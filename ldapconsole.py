@@ -481,18 +481,21 @@ if __name__ == '__main__':
         dn = ','.join(["DC=%s" % part for part in args.auth_domain.split('.')])
         lc = LDAPConsole(ldap_server, ldap_session, dn, debug=args.debug)
 
-        last2_query_results = {}
-        last1_query_results = {}
+        last2_query_results, last2_query = {}, ""
+        last1_query_results, last1_query = {}, ""
 
         running = True
         while running:
             try:
                 cmd = input("[\x1b[95m%s\x1b[0m]> " % lc.target_dn).strip().split(" ")
+
                 if cmd[0].lower() == "exit":
                     running = False
 
                 elif cmd[0].lower() == "query":
                     _query = ' '.join(cmd[1:]).strip()
+                    last2_query = last1_query
+                    last1_query = _query
                     if len(_query) == 0:
                         print("\x1b[91mEmpty query.\x1b[0m")
                     else:
@@ -525,10 +528,10 @@ if __name__ == '__main__':
                         if key in last1_query_results.keys():
                             common_keys.append(key)
                         else:
-                            print("[!] key '%s' was in last1 but not in last2" % key)
+                            print("[!] key '%s' was deleted in last results." % key)
                     for key in last1_query_results.keys():
                         if key not in last2_query_results.keys():
-                            print("[!] key '%s' was in last1 but not in last2" % key)
+                            print("[!] key '%s' was added in last results." % key)
                     #
                     for _dn in common_keys:
                         paths_l2 = dict_get_paths(last2_query_results[_dn])
