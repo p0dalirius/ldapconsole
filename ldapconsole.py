@@ -478,7 +478,7 @@ if __name__ == '__main__':
 
         logging.info("Authentication successful!")
 
-        dn = ','.join(["DC=%s" % part for part in args.auth_domain.split('.')])
+        dn = ldap_server.info.other["defaultNamingContext"]
         lc = LDAPConsole(ldap_server, ldap_session, dn, debug=args.debug)
 
         last2_query_results, last2_query = {}, ""
