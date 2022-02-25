@@ -16,6 +16,12 @@ The ldapconsole script allows you to perform custom LDAP requests to a Windows d
  - [x] Authenticate with LM:NT hashes
  - [x] Authenticate with kerberos ticket
 
+## Examples
+
+```sh
+$ ./ldapconsole.py -u 'user1' -p 'Admin123!' -d 'LAB.local' --dc-ip 192.168.2.1
+```
+
 ## Contributing
 
 Pull requests are welcome. Feel free to open an issue if you want to add other features.
