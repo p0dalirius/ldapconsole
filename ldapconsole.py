@@ -583,8 +583,8 @@ if __name__ == '__main__':
                             for key in last1_query_results.keys():
                                 user = last1_query_results[key]
                                 _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
-                                _spn = user["servicePrincipalName"][0].decode('UTF-8')
-                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m : %s" % (_sAMAccountName, _spn, user[0]))
+                                for spn in user["servicePrincipalName"]:
+                                    print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (_sAMAccountName, spn.decode('UTF-8')))
                         else:
                             print("\x1b[91mNo results.\x1b[0m")
                     elif cmd[1] == "get_all_descriptions":
