@@ -26,7 +26,7 @@ class CommandCompleter(object):
         self.options = {
             "diff": [],
             "query": [],
-            "presetquery": ["get_all_users", "get_all_groups", "get_all_kerberoastables"],
+            "presetquery": ["get_all_users", "get_all_groups", "get_all_kerberoastables", "get_all_descriptions"],
             "help": [],
             "infos": [],
             "exit": []
@@ -596,7 +596,7 @@ if __name__ == '__main__':
                             for key in last1_query_results.keys():
                                 user = last1_query_results[key]
                                 _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
-                                _description = format_sid(user["description"][0])
+                                _description = user["description"]
                                 print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
                         else:
                             print("\x1b[91mNo results.\x1b[0m")
