@@ -478,7 +478,7 @@ if __name__ == '__main__':
 
         logging.info("Authentication successful!")
 
-        dn = ldap_server.info.other["defaultNamingContext"]
+        dn = ldap_server.info.other["defaultNamingContext"][0]
         lc = LDAPConsole(ldap_server, ldap_session, dn, debug=args.debug)
 
         last2_query_results, last2_query = {}, ""
@@ -568,9 +568,9 @@ if __name__ == '__main__':
                         if len(last1_query_results.keys()) != 0:
                             for key in last1_query_results.keys():
                                 user = last1_query_results[key]
-                                _samname = user["sAMAccountName"][0].decode('UTF-8')
+                                _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
                                 _sid = format_sid(user["objectSid"][0])
-                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_samname, _sid))
+                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _sid))
                         else:
                             print("\x1b[91mNo results.\x1b[0m")
 
@@ -582,9 +582,22 @@ if __name__ == '__main__':
                         if len(last1_query_results.keys()) != 0:
                             for key in last1_query_results.keys():
                                 user = last1_query_results[key]
-                                _samname = user["sAMAccountName"][0].decode('UTF-8')
+                                _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
                                 _spn = user["servicePrincipalName"][0].decode('UTF-8')
-                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m : %s" % (_samname, _spn, user[0]))
+                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m : %s" % (_sAMAccountName, _spn, user[0]))
+                        else:
+                            print("\x1b[91mNo results.\x1b[0m")
+                    elif cmd[1] == "get_all_descriptions":
+                        _query = "(&(objectCategory=person)(objectClass=user)(description=*))"
+                        _attrs = ["description", "sAMAccountName"]
+                        last2_query_results = last1_query_results
+                        last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
+                        if len(last1_query_results.keys()) != 0:
+                            for key in last1_query_results.keys():
+                                user = last1_query_results[key]
+                                _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
+                                _description = format_sid(user["description"][0])
+                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
                         else:
                             print("\x1b[91mNo results.\x1b[0m")
                     else:
