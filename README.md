@@ -23,6 +23,10 @@
 $ ./ldapconsole.py -u 'user1' -p 'Admin123!' -d 'LAB.local' --dc-ip 192.168.2.1
 ```
 
+You can get a list of useful LDAP queries for Windows Active Directory pentesting:
+
+ - https://podalirius.net/en/articles/useful-ldap-queries-for-windows-active-directory-pentesting/
+
 ## Contributing
 
 Pull requests are welcome. Feel free to open an issue if you want to add other features.
