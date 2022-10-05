@@ -1,4 +1,4 @@
-# ldapconsole
+![](./.github/banner.png)
 
 <p align="center">
   The ldapconsole script allows you to perform custom LDAP requests to a Windows domain.
@@ -7,8 +7,6 @@
   <a href="https://twitter.com/intent/follow?screen_name=podalirius_" title="Follow"><img src="https://img.shields.io/twitter/follow/podalirius_?label=Podalirius&style=social"></a>
   <br>
 </p>
-
-![](./.github/example.png)
 
 ## Features
 
@@ -21,6 +19,8 @@
 ```sh
 $ ./ldapconsole.py -u 'user1' -p 'Admin123!' -d 'LAB.local' --dc-ip 192.168.2.1
 ```
+
+![](./.github/example.png)
 
 ## Contributing
 
