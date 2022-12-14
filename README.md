@@ -17,7 +17,7 @@
 ## Examples
 
 ```sh
-$ ./ldapconsole.py -u 'user1' -p 'Admin123!' -d 'LAB.local' --dc-ip 192.168.2.1
+./ldapconsole.py -u 'user1' -p 'Admin123!' -d 'LAB.local' --dc-ip 192.168.2.1
 ```
 
 ![](./.github/example.png)
