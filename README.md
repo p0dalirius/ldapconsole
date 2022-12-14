@@ -14,6 +14,20 @@
  - [x] Authenticate with LM:NT hashes
  - [x] Authenticate with kerberos ticket
 
+## Requirements
+
+For `python-ldap`:
+
+```
+sudo apt-get install libsasl2-dev python-dev libldap2-dev libssl-dev
+```
+
+And then:
+
+```
+python3 -m pip install -r requirements.txt
+```
+
 ## Examples
 
 ```sh
