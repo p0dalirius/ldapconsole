@@ -19,7 +19,7 @@
 For `python-ldap`:
 
 ```
-sudo apt-get install libsasl2-dev python-dev libldap2-dev libssl-dev
+sudo apt-get install libsasl2-dev python3-dev libldap2-dev libssl-dev
 ```
 
 And then:
