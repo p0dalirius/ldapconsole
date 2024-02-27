@@ -6,19 +6,17 @@
 
 import readline
 import argparse
-import sys
-import traceback
-import logging
-import ldap
-import ldap3
-from impacket.smbconnection import SMBConnection, SMB2_DIALECT_002, SMB2_DIALECT_21, SMB_DIALECT, SessionError
-from impacket.spnego import SPNEGO_NegTokenInit, TypesMech
 from ldap3.protocol.formatters.formatters import format_sid
-from impacket import version
-import re
+import ldap3
+from sectools.windows.ldap import raw_ldap_query, init_ldap_session
+from sectools.windows.crypto import nt_hash, parse_lm_nt_hashes
 import os
-import ssl
-import binascii
+import traceback
+import sys
+import xlsxwriter
+
+
+VERSION = "2.0.1"
 
 
 class CommandCompleter(object):
@@ -60,7 +58,6 @@ readline.set_completer(CommandCompleter().complete)
 readline.parse_and_bind('tab: complete')
 readline.set_completer_delims('\n')
 
-
 ### Data utils
 
 def dict_get_paths(d):
@@ -84,21 +81,39 @@ def dict_path_access(d, path):
 
 ### LDAPConsole
 
-class LDAPConsole(object):
-    """docstring for LDAPConsole."""
+# LDAP controls
+# https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/3c5e87db-4728-4f29-b164-01dd7d7391ea
+LDAP_PAGED_RESULT_OID_STRING = "1.2.840.113556.1.4.319"
+# https://docs.microsoft.com/en-us/openspecs/windows_protocols/ms-adts/f14f3610-ee22-4d07-8a24-1bf1466cba5f
+LDAP_SERVER_NOTIFICATION_OID = "1.2.840.113556.1.4.528"
 
-    def __init__(self, ldap_server, ldap_session, target_dn, debug=False):
-        super(LDAPConsole, self).__init__()
+class LDAPSearcher(object):
+    def __init__(self, ldap_server, ldap_session):
+        super(LDAPSearcher, self).__init__()
         self.ldap_server = ldap_server
         self.ldap_session = ldap_session
-        self.delegate_from = None
-        self.target_dn = target_dn
-        self.debug = debug
 
-        # if self.debug == True:
-        #    logging.info("Using dn: %s" % self.target_dn)
+    def query(self, base_dn, query, attributes=['*'], page_size=1000):
+        """
+        Executes an LDAP query with optional notification control.
 
-    def query(self, query, attributes=['*'], quiet=False):
+        This method performs an LDAP search operation based on the provided query and attributes. It supports
+        pagination to handle large datasets and can optionally enable notification control to receive updates
+        about changes in the LDAP directory.
+
+        Parameters:
+        - query (str): The LDAP query string.
+        - attributes (list of str): A list of attribute names to include in the search results. Defaults to ['*'], which returns all attributes.
+        - notify (bool): If True, enables the LDAP server notification control to receive updates about changes. Defaults to False.
+
+        Returns:
+        - dict: A dictionary where each key is a distinguished name (DN) and each value is a dictionary of attributes for that DN.
+
+        Raises:
+        - ldap3.core.exceptions.LDAPInvalidFilterError: If the provided query string is not a valid LDAP filter.
+        - Exception: For any other issues encountered during the search operation.
+        """
+
         results = {}
         try:
             # https://ldap3.readthedocs.io/en/latest/searches.html#the-search-operation
@@ -106,53 +121,89 @@ class LDAPConsole(object):
             paged_cookie = None
             while paged_response == True:
                 self.ldap_session.search(
-                    self.target_dn, query, attributes=attributes,
-                    size_limit=0, paged_size=1000, paged_cookie=paged_cookie
+                    base_dn,
+                    query,
+                    attributes=attributes,
+                    size_limit=0,
+                    paged_size=page_size,
+                    paged_cookie=paged_cookie
                 )
                 if "controls" in self.ldap_session.result.keys():
-                    if "1.2.840.113556.1.4.319" in self.ldap_session.result["controls"].keys():
-                        _tmp_cookie = self.ldap_session.result["controls"]["1.2.840.113556.1.4.319"]["value"]["cookie"]
-                        if len(_tmp_cookie) == 0:
+                    if LDAP_PAGED_RESULT_OID_STRING in self.ldap_session.result["controls"].keys():
+                        next_cookie = self.ldap_session.result["controls"][LDAP_PAGED_RESULT_OID_STRING]["value"]["cookie"]
+                        if len(next_cookie) == 0:
                             paged_response = False
                         else:
                             paged_response = True
-                            paged_cookie = _tmp_cookie
+                            paged_cookie = next_cookie
                     else:
                         paged_response = False
                 else:
                     paged_response = False
-                #
                 for entry in self.ldap_session.response:
                     if entry['type'] != 'searchResEntry':
                         continue
-                    results[entry['dn']] = entry["raw_attributes"]
-                    if quiet == False:
-                        self._print_entry_colored(entry['dn'], results[entry['dn']])
+                    results[entry['dn']] = entry["attributes"]
         except ldap3.core.exceptions.LDAPInvalidFilterError as e:
             print("Invalid Filter. (ldap3.core.exceptions.LDAPInvalidFilterError)")
         except Exception as e:
             raise e
         return results
 
-    def oldquery(self, query, attributes=['*'], quiet=False):
+    def query_all_naming_contexts(self, query, attributes=['*'], page_size=1000):
+        """
+        Queries all naming contexts on the LDAP server with the given query and attributes.
+
+        This method iterates over all naming contexts retrieved from the LDAP server's information,
+        performing a paged search for each context using the provided query and attributes. The results
+        are aggregated and returned as a dictionary where each key is a distinguished name (DN) and
+        each value is a dictionary of attributes for that DN.
+
+        Parameters:
+        - query (str): The LDAP query to execute.
+        - attributes (list of str): A list of attribute names to retrieve for each entry. Defaults to ['*'] which fetches all attributes.
+
+        Returns:
+        - dict: A dictionary where each key is a DN and each value is a dictionary of attributes for that DN.
+        """
+
         results = {}
         try:
-            self.ldap_session.search(self.target_dn, query, attributes=attributes)
-            for entry in self.ldap_session.response:
-                if entry['type'] != 'searchResEntry':
-                    continue
-                results[entry['dn']] = entry["raw_attributes"]
-                if quiet == False:
-                    self._print_entry_colored(entry['dn'], results[entry['dn']])
+            for naming_context in self.ldap_server.info.naming_contexts:
+                paged_response = True
+                paged_cookie = None
+                while paged_response == True:
+                    self.ldap_session.search(
+                        naming_context,
+                        query,
+                        attributes=attributes,
+                        size_limit=0,
+                        paged_size=self.page_size,
+                        paged_cookie=paged_cookie
+                    )
+                    if "controls" in self.ldap_session.result.keys():
+                        if LDAP_PAGED_RESULT_OID_STRING in self.ldap_session.result["controls"].keys():
+                            next_cookie = self.ldap_session.result["controls"][LDAP_PAGED_RESULT_OID_STRING]["value"]["cookie"]
+                            if len(next_cookie) == 0:
+                                paged_response = False
+                            else:
+                                paged_response = True
+                                paged_cookie = next_cookie
+                        else:
+                            paged_response = False
+                    else:
+                        paged_response = False
+                    for entry in self.ldap_session.response:
+                        if entry['type'] != 'searchResEntry':
+                            continue
+                        results[entry['dn']] = entry["attributes"]
         except ldap3.core.exceptions.LDAPInvalidFilterError as e:
-            print("\x1b[91mInvalid Filter.\x1b[0m")
+            print("Invalid Filter. (ldap3.core.exceptions.LDAPInvalidFilterError)")
         except Exception as e:
-            if self.debug == True:
-                traceback.print_exc()
-            logging.error(str(e))
+            raise e
         return results
 
-    def _print_entry_colored(self, dn, entry):
+    def print_colored_result(self, dn, data):
         def _parse_print(element, depth=0, maxdepth=15, prompt=['  | ', '  └─>']):
             _pre = prompt[0] * (depth) + prompt[1]
             if depth < maxdepth:
@@ -188,227 +239,94 @@ class LDAPConsole(object):
             else:
                 # Max depth reached
                 pass
-
         #
         print("[>] %s" % dn)
-        _parse_print(entry, prompt=['    ', '    '])
+        _parse_print(data, prompt=['    ', '    '])
 
 
-def get_machine_name(args, domain):
-    if args.dc_ip is not None:
-        s = SMBConnection(args.dc_ip, args.dc_ip)
-    else:
-        s = SMBConnection(domain, domain)
-    try:
-        s.login('', '')
-    except Exception:
-        if s.getServerName() == '':
-            raise Exception('Error while anonymous logging into %s' % domain)
-    else:
-        s.logoff()
-    return s.getServerName()
+class PresetQueries(object):
+    preset_queries = {
+        "all_users": {
+            "description": "",
+            "filter": "(&(objectCategory=person)(objectClass=user))"
+        },
+        "all_groups": {
+            "description": "",
+            "filter": "(objectClass=group)"
+        },
+        "all_computers": {
+            "description": "",
+            "filter": "(objectClass=computer)"
+        },
+        "all_organizational_units": {
+            "description": "",
+            "filter": "(objectClass=organizationalUnit)"
+        }
+    }
+    
+    def __init__(self, ldapSearcher):
+        self.ldapSearcher = ldapSearcher
 
+    def perform(self, command, arguments):
+        if command in self.preset_queries.keys():
+            if command == "all_users":
+                self.get_all_users()
 
-def init_ldap_connection(target, tls_version, args, domain, username, password, lmhash, nthash):
-    user = '%s\\%s' % (domain, username)
-    if tls_version is not None:
-        use_ssl = True
-        port = 636
-        tls = ldap3.Tls(validate=ssl.CERT_NONE, version=tls_version)
-    else:
-        use_ssl = False
-        port = 389
-        tls = None
-    ldap_server = ldap3.Server(target, get_info=ldap3.ALL, port=port, use_ssl=use_ssl, tls=tls)
-
-    if args.use_kerberos:
-        ldap_session = ldap3.Connection(ldap_server)
-        ldap_session.bind()
-        ldap3_kerberos_login(ldap_session, target, username, password, domain, lmhash, nthash, args.auth_key, kdcHost=args.dc_ip)
-    elif args.auth_hashes is not None:
-        if lmhash == "":
-            lmhash = "aad3b435b51404eeaad3b435b51404ee"
-        ldap_session = ldap3.Connection(ldap_server, user=user, password=lmhash + ":" + nthash, authentication=ldap3.NTLM, auto_bind=True)
-    else:
-        ldap_session = ldap3.Connection(ldap_server, user=user, password=password, authentication=ldap3.NTLM, auto_bind=True)
-
-    return ldap_server, ldap_session
-
-
-def init_ldap_session(args, domain, username, password, lmhash, nthash):
-    if args.use_kerberos:
-        target = get_machine_name(args, domain)
-    else:
-        if args.dc_ip is not None:
-            target = args.dc_ip
-        else:
-            target = domain
-
-    if args.use_ldaps is True:
-        try:
-            return init_ldap_connection(target, ssl.PROTOCOL_TLSv1_2, args, domain, username, password, lmhash, nthash)
-        except ldap3.core.exceptions.LDAPSocketOpenError:
-            return init_ldap_connection(target, ssl.PROTOCOL_TLSv1, args, domain, username, password, lmhash, nthash)
-    else:
-        return init_ldap_connection(target, None, args, domain, username, password, lmhash, nthash)
-
-
-def ldap3_kerberos_login(connection, target, user, password, domain='', lmhash='', nthash='', aesKey='', kdcHost=None, TGT=None, TGS=None, useCache=True):
-    from pyasn1.codec.ber import encoder, decoder
-    from pyasn1.type.univ import noValue
-    """
-    logins into the target system explicitly using Kerberos. Hashes are used if RC4_HMAC is supported.
-    :param string user: username
-    :param string password: password for the user
-    :param string domain: domain where the account is valid for (required)
-    :param string lmhash: LMHASH used to authenticate using hashes (password is not used)
-    :param string nthash: NTHASH used to authenticate using hashes (password is not used)
-    :param string aesKey: aes256-cts-hmac-sha1-96 or aes128-cts-hmac-sha1-96 used for Kerberos authentication
-    :param string kdcHost: hostname or IP Address for the KDC. If None, the domain will be used (it needs to resolve tho)
-    :param struct TGT: If there's a TGT available, send the structure here and it will be used
-    :param struct TGS: same for TGS. See smb3.py for the format
-    :param bool useCache: whether or not we should use the ccache for credentials lookup. If TGT or TGS are specified this is False
-    :return: True, raises an Exception if error.
-    """
-
-    if lmhash != '' or nthash != '':
-        if len(lmhash) % 2:
-            lmhash = '0' + lmhash
-        if len(nthash) % 2:
-            nthash = '0' + nthash
-        try:  # just in case they were converted already
-            lmhash = binascii.unhexlify(lmhash)
-            nthash = binascii.unhexlify(nthash)
-        except TypeError:
-            pass
-
-    # Importing down here so pyasn1 is not required if kerberos is not used.
-    from impacket.krb5.ccache import CCache
-    from impacket.krb5.asn1 import AP_REQ, Authenticator, TGS_REP, seq_set
-    from impacket.krb5.kerberosv5 import getKerberosTGT, getKerberosTGS
-    from impacket.krb5 import constants
-    from impacket.krb5.types import Principal, KerberosTime, Ticket
-    import datetime
-
-    if TGT is not None or TGS is not None:
-        useCache = False
-
-    if useCache:
-        try:
-            ccache = CCache.loadFile(os.getenv('KRB5CCNAME'))
-        except Exception as e:
-            # No cache present
-            print(e)
-            pass
-        else:
-            # retrieve domain information from CCache file if needed
-            if domain == '':
-                domain = ccache.principal.realm['data'].decode('utf-8')
-                logging.debug('Domain retrieved from CCache: %s' % domain)
-
-            logging.debug('Using Kerberos Cache: %s' % os.getenv('KRB5CCNAME'))
-            principal = 'ldap/%s@%s' % (target.upper(), domain.upper())
-
-            creds = ccache.getCredential(principal)
-            if creds is None:
-                # Let's try for the TGT and go from there
-                principal = 'krbtgt/%s@%s' % (domain.upper(), domain.upper())
-                creds = ccache.getCredential(principal)
-                if creds is not None:
-                    TGT = creds.toTGT()
-                    logging.debug('Using TGT from cache')
+            elif command == "all_kerberoastables":
+                _query = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
+                _attrs = ['sAMAccountName', 'servicePrincipalName']
+                last2_query_results = last1_query_results
+                last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
+                if len(last1_query_results.keys()) != 0:
+                    for key in last1_query_results.keys():
+                        user = last1_query_results[key]
+                        _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
+                        for spn in user["servicePrincipalName"]:
+                            print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (_sAMAccountName, spn.decode('UTF-8')))
                 else:
-                    logging.debug('No valid credentials found in cache')
+                    print("\x1b[91mNo results.\x1b[0m")
+                    
+            elif command == "all_descriptions":
+                _query = "(&(objectCategory=person)(objectClass=user)(description=*))"
+                _attrs = ["description", "sAMAccountName"]
+                last2_query_results = last1_query_results
+                last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
+                if len(last1_query_results.keys()) != 0:
+                    for key in last1_query_results.keys():
+                        user = last1_query_results[key]
+                        _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
+                        _description = user["description"][0].decode('UTF-8')
+                        print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
+                else:
+                    print("\x1b[91mNo results.\x1b[0m")
+        
+        else:
+            print("[!] Unknown preset query '%s'. Here is a list of the available preset queries:" % command)
+            self.print_help()
+
+    def get_all_users(self, attributes=["objectSid", "sAMAccountName"]):
+        results = self.ldapSearcher.query(
+            self.preset_queries[""],
+            attributes=_attrs,
+            quiet=True
+        )
+        if len(results.keys()) != 0:
+            if attributes == ["objectSid", "sAMAccountName"]:
+                for distinguishedName in results.keys():
+                    _sAMAccountName = results[distinguishedName]["sAMAccountName"][0].decode('UTF-8')
+                    _sid = format_sid(results[distinguishedName]["objectSid"][0])
+                    print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _sid))
             else:
-                TGS = creds.toTGS(principal)
-                logging.debug('Using TGS from cache')
+                for distinguishedName in results.keys():
+                    print("[+] %s" % distinguishedName)
+                    for attrName in attributes:
+                        print(" | %s : %s" % (attrName, results[distinguishedName][attrName][0].decode('UTF-8')))
+        else:
+            print("\x1b[91mNo results.\x1b[0m")
 
-            # retrieve user information from CCache file if needed
-            if user == '' and creds is not None:
-                user = creds['client'].prettyPrint().split(b'@')[0].decode('utf-8')
-                logging.debug('Username retrieved from CCache: %s' % user)
-            elif user == '' and len(ccache.principal.components) > 0:
-                user = ccache.principal.components[0]['data'].decode('utf-8')
-                logging.debug('Username retrieved from CCache: %s' % user)
-
-    # First of all, we need to get a TGT for the user
-    userName = Principal(user, type=constants.PrincipalNameType.NT_PRINCIPAL.value)
-    if TGT is None:
-        if TGS is None:
-            tgt, cipher, oldSessionKey, sessionKey = getKerberosTGT(userName, password, domain, lmhash, nthash, aesKey, kdcHost)
-    else:
-        tgt = TGT['KDC_REP']
-        cipher = TGT['cipher']
-        sessionKey = TGT['sessionKey']
-
-    if TGS is None:
-        serverName = Principal('ldap/%s' % target, type=constants.PrincipalNameType.NT_SRV_INST.value)
-        tgs, cipher, oldSessionKey, sessionKey = getKerberosTGS(serverName, domain, kdcHost, tgt, cipher, sessionKey)
-    else:
-        tgs = TGS['KDC_REP']
-        cipher = TGS['cipher']
-        sessionKey = TGS['sessionKey']
-
-        # Let's build a NegTokenInit with a Kerberos REQ_AP
-
-    blob = SPNEGO_NegTokenInit()
-
-    # Kerberos
-    blob['MechTypes'] = [TypesMech['MS KRB5 - Microsoft Kerberos 5']]
-
-    # Let's extract the ticket from the TGS
-    tgs = decoder.decode(tgs, asn1Spec=TGS_REP())[0]
-    ticket = Ticket()
-    ticket.from_asn1(tgs['ticket'])
-
-    # Now let's build the AP_REQ
-    apReq = AP_REQ()
-    apReq['pvno'] = 5
-    apReq['msg-type'] = int(constants.ApplicationTagNumbers.AP_REQ.value)
-
-    opts = []
-    apReq['ap-options'] = constants.encodeFlags(opts)
-    seq_set(apReq, 'ticket', ticket.to_asn1)
-
-    authenticator = Authenticator()
-    authenticator['authenticator-vno'] = 5
-    authenticator['crealm'] = domain
-    seq_set(authenticator, 'cname', userName.components_to_asn1)
-    now = datetime.datetime.utcnow()
-
-    authenticator['cusec'] = now.microsecond
-    authenticator['ctime'] = KerberosTime.to_asn1(now)
-
-    encodedAuthenticator = encoder.encode(authenticator)
-
-    # Key Usage 11
-    # AP-REQ Authenticator (includes application authenticator
-    # subkey), encrypted with the application session key
-    # (Section 5.5.1)
-    encryptedEncodedAuthenticator = cipher.encrypt(sessionKey, 11, encodedAuthenticator, None)
-
-    apReq['authenticator'] = noValue
-    apReq['authenticator']['etype'] = cipher.enctype
-    apReq['authenticator']['cipher'] = encryptedEncodedAuthenticator
-
-    blob['MechToken'] = encoder.encode(apReq)
-
-    request = ldap3.operation.bind.bind_operation(connection.version, ldap3.SASL, user, None, 'GSS-SPNEGO',
-                                                  blob.getData())
-
-    # Done with the Kerberos saga, now let's get into LDAP
-    if connection.closed:  # try to open connection if closed
-        connection.open(read_server_info=False)
-
-    connection.sasl_in_progress = True
-    response = connection.post_send_single_response(connection.send('bindRequest', request, None))
-    connection.sasl_in_progress = False
-    if response[0]['result'] != 0:
-        raise Exception(response)
-
-    connection.bound = True
-
-    return True
+    def print_help(self):
+        for command in self.preset_queries.keys():
+            print(" - %-15s %s. (LDAP Filter: %s)" % (command, self.preset_queries[command]["description"], self.preset_queries[command]["filter"]))
 
 
 def print_help():
@@ -424,11 +342,16 @@ def print_help():
 def parse_args():
     parser = argparse.ArgumentParser(add_help=True, description='Python (re)setter for property msDS-KeyCredentialLink for Shadow Credentials attacks.')
     parser.add_argument('--use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
-    parser.add_argument("-q", "--quiet", dest="quiet", action="store_true", default=False, help="show no information at all")
     parser.add_argument("-debug", dest="debug", action="store_true", default=False, help="Debug mode")
+
+    parser.add_argument("-q", "--query", dest="query", default=None, type=str, help="LDAP query")
+    parser.add_argument("-a", "--attribute", dest="attributes", default=[], action="append", type=str, help="Attributes to extract.")
+
+    parser.add_argument("-x", "--xlsx", dest="xlsx", default=None, type=str, help="Output results to an XLSX file.")
 
     authconn = parser.add_argument_group('authentication & connection')
     authconn.add_argument('--dc-ip', action='store', metavar="ip address", help='IP Address of the domain controller or KDC (Key Distribution Center) for Kerberos. If omitted it will use the domain part (FQDN) specified in the identity parameter')
+    authconn.add_argument('--kdcHost', dest="kdcHost", action='store', metavar="FQDN KDC", help='FQDN of KDC for Kerberos.')
     authconn.add_argument("-d", "--domain", dest="auth_domain", metavar="DOMAIN", action="store", help="(FQDN) domain to authenticate to")
     authconn.add_argument("-u", "--user", dest="auth_username", metavar="USER", action="store", help="user to authenticate with")
 
@@ -450,170 +373,229 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    args = parse_args()
+    options = parse_args()
 
-    print("[+]======================================================")
-    print("[+]    LDAP search console v1.1        @podalirius_      ")
-    print("[+]======================================================")
-    print()
+    print("LDAP search console v%s - by @podalirius_\n" % VERSION)
 
+    # Parse hashes
     auth_lm_hash = ""
     auth_nt_hash = ""
-    if args.auth_hashes is not None:
-        if ":" in args.auth_hashes:
-            auth_lm_hash = args.auth_hashes.split(":")[0]
-            auth_nt_hash = args.auth_hashes.split(":")[1]
+    if options.auth_hashes is not None:
+        if ":" in options.auth_hashes:
+            auth_lm_hash = options.auth_hashes.split(":")[0]
+            auth_nt_hash = options.auth_hashes.split(":")[1]
         else:
-            auth_nt_hash = args.auth_hashes
-
+            auth_nt_hash = options.auth_hashes
+    
+    # Use AES Authentication key if available
+    if options.auth_key is not None:
+        options.use_kerberos = True
+    if options.use_kerberos is True and options.kdcHost is None:
+        print("[!] Specify KDC's Hostname of FQDN using the argument --kdcHost")
+        exit()
+    
+    # Try to authenticate with specified credentials
     try:
+        print("[>] Try to authenticate as '%s\\%s' on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
         ldap_server, ldap_session = init_ldap_session(
-            args=args,
-            domain=args.auth_domain,
-            username=args.auth_username,
-            password=args.auth_password,
-            lmhash=auth_lm_hash,
-            nthash=auth_nt_hash
+            auth_domain=options.auth_domain,
+            auth_dc_ip=options.dc_ip,
+            auth_username=options.auth_username,
+            auth_password=options.auth_password,
+            auth_lm_hash=auth_lm_hash,
+            auth_nt_hash=auth_nt_hash,
+            auth_key=options.auth_key,
+            use_kerberos=options.use_kerberos,
+            kdcHost=options.kdcHost,
+            use_ldaps=options.use_ldaps
         )
+        print("[+] Authentication successful!\n")
 
-        logging.info("Authentication successful!")
+        search_base = ldap_server.info.other["defaultNamingContext"][0]
+        ls = LDAPSearcher(ldap_server=ldap_server, ldap_session=ldap_session)
 
-        dn = ldap_server.info.other["defaultNamingContext"][0]
-        lc = LDAPConsole(ldap_server, ldap_session, dn, debug=args.debug)
+        # Single query inline
+        if options.query is not None:
+            results = ls.query(
+                base_dn=search_base,
+                query=options.query,
+                attributes=options.attributes
+            )
 
-        last2_query_results, last2_query = {}, ""
-        last1_query_results, last1_query = {}, ""
+            if options.xlsx is not None:
+                print("[>] Exporting results to %s ... " % options.xlsx, end="")
+                sys.stdout.flush()
 
-        running = True
-        while running:
-            try:
-                cmd = input("[\x1b[95m%s\x1b[0m]> " % lc.target_dn).strip().split(" ")
+                basepath = os.path.dirname(options.xlsx)
+                filename = os.path.basename(options.xlsx)
+                if basepath not in [".", ""]:
+                    if not os.path.exists(basepath):
+                        os.makedirs(basepath)
+                    path_to_file = basepath + os.path.sep + filename
+                else:
+                    path_to_file = filename
+                
+                # https://xlsxwriter.readthedocs.io/workbook.html#Workbook
+                workbook_options = {
+                    'constant_memory': True, 
+                    'in_memory': True, 
+                    'strings_to_formulas': False,
+                    'remove_timezone': True
+                }
+                workbook = xlsxwriter.Workbook(filename=path_to_file, options=workbook_options)
+                worksheet = workbook.add_worksheet()
+                
+                if '*' in options.attributes:
+                    attributes = []
+                    options.attributes.remove('*')
+                    attributes += options.attributes
+                    first_dn = list(results.keys())[0]
+                    for dn in results.keys():
+                        attributes = sorted(list(set(attributes + list(results[dn].keys()))))
+                else:
+                    attributes = options.attributes
 
-                if cmd[0].lower() == "exit":
+                header_format = workbook.add_format({'bold': 1})
+                header_fields = ["distinguishedName"] + attributes
+                for k in range(len(header_fields)):
+                    worksheet.set_column(k, k + 1, len(header_fields[k]) + 3)
+                worksheet.set_row(0, 20, header_format)
+                worksheet.write_row(0, 0, header_fields)
+
+                row_id = 1
+                for distinguishedName in results.keys():
+                    data = [distinguishedName]
+                    for attr in attributes:
+                        if attr in results[distinguishedName].keys():
+                            value = results[distinguishedName][attr]
+                            if type(value) == str:
+                                data.append(value)
+                            elif type(value) == bytes:
+                                data.append(str(value))
+                            elif type(value) == list:
+                                data.append('\n'.join([str(l) for l in value]))
+                            else:
+                                data.append(str(value))
+                        else:
+                            data.append("")
+                    worksheet.write_row(row_id, 0, data)
+                    row_id += 1
+
+                worksheet.autofilter(0, 0, row_id, len(header_fields) - 1)
+                workbook.close()
+
+            else:
+                for dn in sorted(list(results.keys())):
+                    ls.print_colored_result(dn=dn, data=results[dn])
+
+            print("\n[+] Done.")
+
+        # Live console
+        else:
+            last2_query_results, last2_query = {}, ""
+            last1_query_results, last1_query = {}, ""
+
+            running = True
+            while running:
+                try:
+                    userinput = input("[\x1b[95m%s\x1b[0m]> " % search_base).strip().split(" ")
+                    command, arguments = userinput[0].lower(), userinput[1:]
+
+                    if command == "exit":
+                        running = False
+
+                    elif command == "query":
+                        _query = ' '.join(arguments[0:]).strip()
+                        last2_query = last1_query
+                        last1_query = _query
+                        if len(_query) == 0:
+                            print("\x1b[91m[!] Empty query.\x1b[0m")
+                        else:
+                            try:
+                                _select_index = [c.lower() for c in arguments].index('select')
+                            except ValueError as e:
+                                _select_index = -1
+
+                            if _select_index != -1:
+                                _query = ' '.join(arguments[0:_select_index]).strip()
+                                _attrs = arguments[_select_index + 1:]
+                            else:
+                                _query = ' '.join(arguments[0:]).strip()
+                                _attrs = ['*']
+
+                            last2_query_results = last1_query_results
+                            last1_query_results = ls.query(base_dn=search_base, query=_query, attributes=_attrs)
+
+                            for dn in sorted(list(last1_query_results.keys())):
+                                ls.print_colored_result(dn=dn, data=last1_query_results[dn])
+
+                    elif command == "searchbase":
+                        __searchbase = ' '.join(arguments)
+                        if '.' in __searchbase:
+                            __searchbase = ','.join(["DC=%s" % part for part in __searchbase.split('.')])
+                        search_base = __searchbase
+
+                    # Displays the difference between this query results and the results of the query before
+                    elif command == "diff":
+                        # Todo; handle the added and removed DN results
+                        common_keys = []
+                        for key in last2_query_results.keys():
+                            if key in last1_query_results.keys():
+                                common_keys.append(key)
+                            else:
+                                print("[!] key '%s' was deleted in last results." % key)
+                        for key in last1_query_results.keys():
+                            if key not in last2_query_results.keys():
+                                print("[!] key '%s' was added in last results." % key)
+                        #
+                        for _dn in common_keys:
+                            paths_l2 = dict_get_paths(last2_query_results[_dn])
+                            paths_l1 = dict_get_paths(last1_query_results[_dn])
+                            #
+                            attrs_diff = []
+                            for p in paths_l1:
+                                vl2 = dict_path_access(last2_query_results[_dn], p)
+                                vl1 = dict_path_access(last1_query_results[_dn], p)
+                                if vl1 != vl2:
+                                    attrs_diff.append((p, vl1, vl2))
+                            #
+                            if len(attrs_diff) != 0:
+                                # Print DN
+                                print(_dn)
+                                for _ad in attrs_diff:
+                                    path, vl1, vl2 = _ad
+                                    print("    " + "──>".join(["\"\x1b[93m%s\x1b[0m\"" % attr for attr in path]) + ":")
+                                    if vl1 is not None:
+                                        print("    " + "  > " + "Old value:", vl2)
+                                    else:
+                                        print("    " + "  > " + "Old value: None (attribute was not present in the last reponse)")
+                                    if vl2 is not None:
+                                        print("    " + "  > " + "New value:", vl1)
+                                    else:
+                                        print("    " + "  > " + "New value: None (attribute is not present in the reponse)")
+
+                    # 
+                    elif command == "presetquery":
+                        pq = PresetQueries(ldapSearcher=ls)
+                        pq.perform(command, arguments)
+                    
+                    # Display help
+                    elif command == "help":
+                        print_help()
+
+                    # Fallback to unknown command
+                    else:
+                        print("Unknown command. Type 'help' for help.")
+
+                except KeyboardInterrupt as e:
+                    print()
                     running = False
 
-                elif cmd[0].lower() == "query":
-                    _query = ' '.join(cmd[1:]).strip()
-                    last2_query = last1_query
-                    last1_query = _query
-                    if len(_query) == 0:
-                        print("\x1b[91mEmpty query.\x1b[0m")
-                    else:
-                        try:
-                            _select_index = [c.lower() for c in cmd].index('select')
-                        except ValueError as e:
-                            _select_index = -1
-
-                        if _select_index != -1:
-                            _query = ' '.join(cmd[1:_select_index]).strip()
-                            _attrs = cmd[_select_index + 1:]
-                            last2_query_results = last1_query_results
-                            last1_query_results = lc.query(_query, attributes=_attrs)
-                        else:
-                            _query = ' '.join(cmd[1:]).strip()
-                            _attrs = ['*']
-                            last2_query_results = last1_query_results
-                            last1_query_results = lc.query(_query, attributes=_attrs)
-
-                elif cmd[0].lower() == "base":
-                    _base = ' '.join(cmd[1:])
-                    if '.' in _base:
-                        _base = ','.join(["DC=%s" % part for part in _base.split('.')])
-                    lc.target_dn = _base
-
-                elif cmd[0].lower() == "diff":
-                    # Todo; handle the added and removed DN results
-                    common_keys = []
-                    for key in last2_query_results.keys():
-                        if key in last1_query_results.keys():
-                            common_keys.append(key)
-                        else:
-                            print("[!] key '%s' was deleted in last results." % key)
-                    for key in last1_query_results.keys():
-                        if key not in last2_query_results.keys():
-                            print("[!] key '%s' was added in last results." % key)
-                    #
-                    for _dn in common_keys:
-                        paths_l2 = dict_get_paths(last2_query_results[_dn])
-                        paths_l1 = dict_get_paths(last1_query_results[_dn])
-                        #
-                        attrs_diff = []
-                        for p in paths_l1:
-                            vl2 = dict_path_access(last2_query_results[_dn], p)
-                            vl1 = dict_path_access(last1_query_results[_dn], p)
-                            if vl1 != vl2:
-                                attrs_diff.append((p, vl1, vl2))
-                        #
-                        if len(attrs_diff) != 0:
-                            # Print DN
-                            print(_dn)
-                            for _ad in attrs_diff:
-                                path, vl1, vl2 = _ad
-                                print("    " + "──>".join(["\"\x1b[93m%s\x1b[0m\"" % attr for attr in path]) + ":")
-                                if vl1 is not None:
-                                    print("    " + "  > " + "Old value:", vl2)
-                                else:
-                                    print("    " + "  > " + "Old value: None (attribute was not present in the last reponse)")
-                                if vl2 is not None:
-                                    print("    " + "  > " + "New value:", vl1)
-                                else:
-                                    print("    " + "  > " + "New value: None (attribute is not present in the reponse)")
-
-                elif cmd[0].lower() == "presetquery":
-                    if cmd[1] == "get_all_users":
-                        _query = "(&(objectCategory=person)(objectClass=user))"
-                        _attrs = ["objectSid", "sAMAccountName"]
-                        last2_query_results = last1_query_results
-                        last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
-                        if len(last1_query_results.keys()) != 0:
-                            for key in last1_query_results.keys():
-                                user = last1_query_results[key]
-                                _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
-                                _sid = format_sid(user["objectSid"][0])
-                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _sid))
-                        else:
-                            print("\x1b[91mNo results.\x1b[0m")
-
-                    elif cmd[1] == "get_all_kerberoastables":
-                        _query = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-                        _attrs = ['sAMAccountName', 'servicePrincipalName']
-                        last2_query_results = last1_query_results
-                        last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
-                        if len(last1_query_results.keys()) != 0:
-                            for key in last1_query_results.keys():
-                                user = last1_query_results[key]
-                                _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
-                                for spn in user["servicePrincipalName"]:
-                                    print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (_sAMAccountName, spn.decode('UTF-8')))
-                        else:
-                            print("\x1b[91mNo results.\x1b[0m")
-                    elif cmd[1] == "get_all_descriptions":
-                        _query = "(&(objectCategory=person)(objectClass=user)(description=*))"
-                        _attrs = ["description", "sAMAccountName"]
-                        last2_query_results = last1_query_results
-                        last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
-                        if len(last1_query_results.keys()) != 0:
-                            for key in last1_query_results.keys():
-                                user = last1_query_results[key]
-                                _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
-                                _description = user["description"][0].decode('UTF-8')
-                                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
-                        else:
-                            print("\x1b[91mNo results.\x1b[0m")
-                    else:
-                        pass
-                elif cmd[0].lower() == "help":
-                    print_help()
-                else:
-                    print("Unknown command. Type 'help' for help.")
-            except KeyboardInterrupt as e:
-                print()
-                running = False
-            except EOFError as e:
-                print()
-                running = False
+                except EOFError as e:
+                    print()
+                    running = False
 
     except Exception as e:
-        if args.debug:
+        if options.debug:
             traceback.print_exc()
-        logging.warning(str(e))
+        print("[!] Error: %s" % str(e))
