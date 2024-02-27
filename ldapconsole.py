@@ -423,7 +423,7 @@ if __name__ == '__main__':
             )
 
             if options.xlsx is not None:
-                print("[>] Exporting results to %s ... " % options.xlsx, end="")
+                print("[>] Exporting %d results to %s ... " % (len(list(results.keys())), options.xlsx), end="")
                 sys.stdout.flush()
 
                 basepath = os.path.dirname(options.xlsx)
