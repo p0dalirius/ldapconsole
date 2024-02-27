@@ -11,31 +11,44 @@
 
 ## Features
 
- - [x] Authenticate with password
- - [x] Authenticate with LM:NT hashes
- - [x] Authenticate with kerberos ticket
-
+ - [x] Authentications:
+   - [x] Authenticate with password
+   - [x] Authenticate with LM:NT hashes (Pass the Hash)
+   - [x] Authenticate with kerberos ticket (Pass the Ticket)
+ - [x] Interactive mode
+   - [x] Colored results
+   - [x] Preset queries 
+ - [x] Non-interactive mode
+   - [x] Colored results
+   - [x] Exportable to XLSX format with option `--xlsx`
+  
 ## Requirements
 
 For `python-ldap`:
 
-```
+```bash
 sudo apt-get install libsasl2-dev python3-dev libldap2-dev libssl-dev
 ```
 
 And then:
 
-```
+```bash
 python3 -m pip install -r requirements.txt
 ```
 
 ## Examples
 
-```sh
+```bash
 ./ldapconsole.py -u 'user1' -p 'Admin123!' -d 'LAB.local' --dc-ip 192.168.2.1
 ```
 
 ![](./.github/example.png)
+
+### Extract the list of the computers with an obsolete OS to an Excel file
+
+```bash
+./ldapconsole.py -d LAB.local -u Administrator -p 'Admin123!' --dc-ip 10.0.0.101 -q '(&(objectCategory=Computer)(|(operatingSystem=Windows 2000*)(operatingSystem=Windows Vista*)(operatingSystem=Windows XP*)(operatingSystem=Windows 7*)(operatingSystem=Windows 8*)(operatingSystem=Windows Server 200*)(operatingSystem=Windows Server 2012*)))' -a 'operatingSystem' -a 'operatingSystemVersion' -x ComputersWithObsoleteOSes.xlsx
+```
 
 ## Contributing
 
