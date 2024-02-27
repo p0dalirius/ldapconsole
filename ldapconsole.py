@@ -340,7 +340,7 @@ def print_help():
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(add_help=True, description='Python (re)setter for property msDS-KeyCredentialLink for Shadow Credentials attacks.')
+    parser = argparse.ArgumentParser(add_help=True, description='LDAP console')
     parser.add_argument('--use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
     parser.add_argument("-debug", dest="debug", action="store_true", default=False, help="Debug mode")
 
