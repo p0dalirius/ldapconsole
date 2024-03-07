@@ -276,7 +276,7 @@ class PresetQueries(object):
                 _query = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
                 _attrs = ['sAMAccountName', 'servicePrincipalName']
                 last2_query_results = last1_query_results
-                last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
+                last1_query_results = self.ldapSearcher.query(_query, attributes=_attrs, quiet=True)
                 if len(last1_query_results.keys()) != 0:
                     for key in last1_query_results.keys():
                         user = last1_query_results[key]
@@ -290,7 +290,7 @@ class PresetQueries(object):
                 _query = "(&(objectCategory=person)(objectClass=user)(description=*))"
                 _attrs = ["description", "sAMAccountName"]
                 last2_query_results = last1_query_results
-                last1_query_results = lc.query(_query, attributes=_attrs, quiet=True)
+                last1_query_results = self.ldapSearcher.query(_query, attributes=_attrs, quiet=True)
                 if len(last1_query_results.keys()) != 0:
                     for key in last1_query_results.keys():
                         user = last1_query_results[key]
