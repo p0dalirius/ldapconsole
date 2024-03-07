@@ -20,6 +20,9 @@ VERSION = "2.0.1"
 
 
 class CommandCompleter(object):
+    """
+    Class for handling command completion in the LDAP console.
+    """
     def __init__(self):
         self.options = {
             "diff": [],
@@ -31,6 +34,18 @@ class CommandCompleter(object):
         }
 
     def complete(self, text, state):
+        """
+        Function to handle command completion in the LDAP console.
+
+        This function completes the user's input based on the available options for commands in the LDAP console.
+
+        Args:
+            text (str): The current text input by the user.
+            state (int): The current state of completion.
+
+        Returns:
+            str: The next completion suggestion based on the user's input state.
+        """
         if state == 0:
             if len(text) == 0:
                 self.matches = [s for s in self.options.keys()]
@@ -88,6 +103,23 @@ LDAP_PAGED_RESULT_OID_STRING = "1.2.840.113556.1.4.319"
 LDAP_SERVER_NOTIFICATION_OID = "1.2.840.113556.1.4.528"
 
 class LDAPSearcher(object):
+    """
+    LDAPSearcher class for executing LDAP queries with pagination and notification control.
+
+    This class provides methods to perform LDAP search operations with support for pagination to handle large datasets.
+    It also offers the option to enable notification control to receive updates about changes in the LDAP directory.
+
+    Attributes:
+    - ldap_server (str): The LDAP server to connect to.
+    - ldap_session (ldap3.Connection): The LDAP session to use for executing queries.
+
+    Methods:
+    - query(base_dn, query, attributes=['*'], page_size=1000): Executes an LDAP query with optional notification control.
+
+    Raises:
+    - ldap3.core.exceptions.LDAPInvalidFilterError: If the provided query string is not a valid LDAP filter.
+    - Exception: For any other issues encountered during the search operation.
+    """
     def __init__(self, ldap_server, ldap_session):
         super(LDAPSearcher, self).__init__()
         self.ldap_server = ldap_server
@@ -204,6 +236,16 @@ class LDAPSearcher(object):
         return results
 
     def print_colored_result(self, dn, data):
+        """
+        This function prints the provided distinguished name (DN) and associated data in a colored and structured format.
+
+        Parameters:
+        - dn (str): The distinguished name (DN) of the LDAP entry.
+        - data (dict): A dictionary containing the attributes associated with the provided DN.
+
+        Returns:
+        - None
+        """
         def _parse_print(element, depth=0, maxdepth=15, prompt=['  | ', '  └─>']):
             _pre = prompt[0] * (depth) + prompt[1]
             if depth < maxdepth:
@@ -245,6 +287,17 @@ class LDAPSearcher(object):
 
 
 class PresetQueries(object):
+    """
+    Class to store preset LDAP queries for common search operations.
+
+    Attributes:
+        preset_queries (dict): A dictionary containing preset queries with descriptions and filters.
+    
+    Methods:
+        __init__(ldapSearcher): Constructor method to initialize the PresetQueries class with an LDAP searcher.
+        perform(command, arguments): Method to perform a specific preset query based on the given command.
+    """
+
     preset_queries = {
         "all_users": {
             "description": "",
@@ -268,6 +321,16 @@ class PresetQueries(object):
         self.ldapSearcher = ldapSearcher
 
     def perform(self, command, arguments):
+        """
+        Method to perform a specific preset query based on the given command.
+
+        Args:
+            command (str): The command specifying the preset query to be performed.
+            arguments (list): Additional arguments for the query.
+
+        Returns:
+            None
+        """
         if command in self.preset_queries.keys():
             if command == "all_users":
                 self.get_all_users()
@@ -305,6 +368,15 @@ class PresetQueries(object):
             self.print_help()
 
     def get_all_users(self, attributes=["objectSid", "sAMAccountName"]):
+        """
+        Method to retrieve all users from LDAP with specified attributes.
+
+        Args:
+            attributes (list): List of attributes to retrieve for each user. Default is ["objectSid", "sAMAccountName"].
+
+        Returns:
+            None
+        """
         results = self.ldapSearcher.query(
             self.preset_queries[""],
             attributes=_attrs,
@@ -325,11 +397,29 @@ class PresetQueries(object):
             print("\x1b[91mNo results.\x1b[0m")
 
     def print_help(self):
+        """
+        Method to print the available preset queries along with their descriptions and LDAP filters.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         for command in self.preset_queries.keys():
             print(" - %-15s %s. (LDAP Filter: %s)" % (command, self.preset_queries[command]["description"], self.preset_queries[command]["filter"]))
 
 
 def print_help():
+    """
+    Function to print the available commands and their descriptions.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
     print(" - %-15s %s " % ("base", "Sets LDAP base DN."))
     print(" - %-15s %s " % ("diff", "Show the differences between the last two requests."))
     print(" - %-15s %s " % ("query", "Sends a query to LDAP."))
