@@ -342,7 +342,8 @@ def print_help():
 def parse_args():
     parser = argparse.ArgumentParser(add_help=True, description='LDAP console')
     parser.add_argument('--use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
-    parser.add_argument("-debug", dest="debug", action="store_true", default=False, help="Debug mode")
+    parser.add_argument("--debug", dest="debug", action="store_true", default=False, help="Debug mode")
+    parser.add_argument("--quiet", dest="quiet", action="store_true", default=False, help="Quiet mode")
 
     parser.add_argument("-q", "--query", dest="query", default=None, type=str, help="LDAP query")
     parser.add_argument("-a", "--attribute", dest="attributes", default=[], action="append", type=str, help="Attributes to extract.")
@@ -375,17 +376,14 @@ def parse_args():
 if __name__ == '__main__':
     options = parse_args()
 
-    print("LDAP search console v%s - by @podalirius_\n" % VERSION)
+    if not options.quiet:
+        print("LDAP search console v%s - by @podalirius_\n" % VERSION)
 
     # Parse hashes
-    auth_lm_hash = ""
-    auth_nt_hash = ""
     if options.auth_hashes is not None:
-        if ":" in options.auth_hashes:
-            auth_lm_hash = options.auth_hashes.split(":")[0]
-            auth_nt_hash = options.auth_hashes.split(":")[1]
-        else:
-            auth_nt_hash = options.auth_hashes
+        if ":" not in options.auth_hashes:
+            options.auth_hashes = ":" + options.auth_hashes
+    auth_lm_hash, auth_nt_hash = parse_lm_nt_hashes(options.auth_hashes)
     
     # Use AES Authentication key if available
     if options.auth_key is not None:
@@ -396,7 +394,8 @@ if __name__ == '__main__':
     
     # Try to authenticate with specified credentials
     try:
-        print("[>] Try to authenticate as '%s\\%s' on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
+        if not options.quiet:
+            print("[>] Try to authenticate as '%s\\%s' on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
         ldap_server, ldap_session = init_ldap_session(
             auth_domain=options.auth_domain,
             auth_dc_ip=options.dc_ip,
@@ -409,7 +408,8 @@ if __name__ == '__main__':
             kdcHost=options.kdcHost,
             use_ldaps=options.use_ldaps
         )
-        print("[+] Authentication successful!\n")
+        if not options.quiet:
+            print("[+] Authentication successful!\n")
 
         search_base = ldap_server.info.other["defaultNamingContext"][0]
         ls = LDAPSearcher(ldap_server=ldap_server, ldap_session=ldap_session)
@@ -488,7 +488,7 @@ if __name__ == '__main__':
                 for dn in sorted(list(results.keys())):
                     ls.print_colored_result(dn=dn, data=results[dn])
 
-            print("\n[+] Done.")
+            print("done.")
 
         # Live console
         else:
