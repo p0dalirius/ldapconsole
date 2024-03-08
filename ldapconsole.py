@@ -619,7 +619,7 @@ if __name__ == '__main__':
                             for dn in sorted(list(last1_query_results.keys())):
                                 ls.print_colored_result(dn=dn, data=last1_query_results[dn])
                             
-                            print("[■] LDAP query returned %d results." % len(last1_query_results.keys()))
+                            print("└──> LDAP query returned %d results." % len(last1_query_results.keys()))
 
                     elif command == "searchbase":
                         __searchbase = ' '.join(arguments)
