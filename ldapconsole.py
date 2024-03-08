@@ -282,7 +282,7 @@ class LDAPSearcher(object):
                 # Max depth reached
                 pass
         #
-        print("[>] %s" % dn)
+        print("│ %s" % dn)
         _parse_print(data, prompt=['    ', '    '])
 
 
