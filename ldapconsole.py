@@ -8,8 +8,8 @@ import readline
 import argparse
 from ldap3.protocol.formatters.formatters import format_sid
 import ldap3
-from sectools.windows.ldap import raw_ldap_query, init_ldap_session
-from sectools.windows.crypto import nt_hash, parse_lm_nt_hashes
+from sectools.windows.ldap import init_ldap_session
+from sectools.windows.crypto import parse_lm_nt_hashes
 import os
 import traceback
 import sys
@@ -27,9 +27,10 @@ class CommandCompleter(object):
         self.options = {
             "diff": [],
             "query": [],
-            "presetquery": ["get_all_users", "get_all_groups", "get_all_kerberoastables", "get_all_descriptions"],
+            "presetquery": ["all_users", "all_groups", "all_kerberoastables", "all_descriptions"],
             "help": [],
             "infos": [],
+            "searchbase": [],
             "exit": []
         }
 
@@ -210,7 +211,7 @@ class LDAPSearcher(object):
                         query,
                         attributes=attributes,
                         size_limit=0,
-                        paged_size=self.page_size,
+                        paged_size=page_size,
                         paged_cookie=paged_cookie
                     )
                     if "controls" in self.ldap_session.result.keys():
@@ -300,20 +301,29 @@ class PresetQueries(object):
 
     preset_queries = {
         "all_users": {
-            "description": "",
-            "filter": "(&(objectCategory=person)(objectClass=user))"
+            "description": "Get the list of all users.",
+            "filter": "(&(objectCategory=person)(objectClass=user))",
+            "attributes": ["objectSid", "sAMAccountName"]
+        },
+        "all_descriptions": {
+            "description": "Get the descriptions of all users.",
+            "filter": "(&(objectCategory=person)(objectClass=user)(description=*))",
+            "attributes": ["sAMAccountName", "description"]
         },
         "all_groups": {
-            "description": "",
-            "filter": "(objectClass=group)"
+            "description": "Get the list of all groups.",
+            "filter": "(objectClass=group)",
+            "attributes": ["distinguishedName"]
         },
         "all_computers": {
-            "description": "",
-            "filter": "(objectClass=computer)"
+            "description": "Get the list of all computers.",
+            "filter": "(objectClass=computer)",
+            "attributes": ["distinguishedName"]
         },
         "all_organizational_units": {
-            "description": "",
-            "filter": "(objectClass=organizationalUnit)"
+            "description": "Get the list of all organizationalUnits.",
+            "filter": "(objectClass=organizationalUnit)",
+            "attributes": ["distinguishedName"]
         }
     }
     
@@ -335,6 +345,9 @@ class PresetQueries(object):
             if command == "all_users":
                 self.get_all_users()
 
+            elif command == "all_descriptions":
+                self.get_all_descriptions()
+            
             elif command == "all_kerberoastables":
                 _query = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
                 _attrs = ['sAMAccountName', 'servicePrincipalName']
@@ -377,10 +390,9 @@ class PresetQueries(object):
         Returns:
             None
         """
-        results = self.ldapSearcher.query(
-            self.preset_queries[""],
-            attributes=_attrs,
-            quiet=True
+        results = self.ldapSearcher.query_all_naming_contexts(
+            query=self.preset_queries["all_users"]["filter"],
+            attributes=self.preset_queries["all_users"]["attributes"]
         )
         if len(results.keys()) != 0:
             if attributes == ["objectSid", "sAMAccountName"]:
@@ -393,6 +405,32 @@ class PresetQueries(object):
                     print("[+] %s" % distinguishedName)
                     for attrName in attributes:
                         print(" | %s : %s" % (attrName, results[distinguishedName][attrName][0].decode('UTF-8')))
+        else:
+            print("\x1b[91mNo results.\x1b[0m")
+
+    def get_all_descriptions(self):
+        """
+        Method to retrieve all descriptions from LDAP.
+
+        This method queries LDAP to retrieve all users with descriptions and prints out their sAMAccountName and description.
+        If no results are found, it prints a message indicating no results.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        results = self.ldapSearcher.query_all_naming_contexts(
+            query=self.preset_queries["all_descriptions"]["filter"],
+            attributes=self.preset_queries["all_descriptions"]["attributes"]
+        )
+
+        if len(results.keys()) != 0:
+            for distinguishedName in results.keys():
+                _sAMAccountName = results[distinguishedName]["sAMAccountName"]
+                _description = format_sid(results[distinguishedName]["description"][0])
+                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
         else:
             print("\x1b[91mNo results.\x1b[0m")
 
@@ -429,9 +467,9 @@ def print_help():
     return
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(add_help=True, description='LDAP console')
-    parser.add_argument('--use-ldaps', action='store_true', help='Use LDAPS instead of LDAP')
+def parseArgs():
+    parser = argparse.ArgumentParser(add_help=True, description="LDAP console")
+    parser.add_argument("--use-ldaps", action="store_true", help="Use LDAPS instead of LDAP")
     parser.add_argument("--debug", dest="debug", action="store_true", default=False, help="Debug mode")
     parser.add_argument("--quiet", dest="quiet", action="store_true", default=False, help="Quiet mode")
 
@@ -440,19 +478,19 @@ def parse_args():
 
     parser.add_argument("-x", "--xlsx", dest="xlsx", default=None, type=str, help="Output results to an XLSX file.")
 
-    authconn = parser.add_argument_group('authentication & connection')
-    authconn.add_argument('--dc-ip', action='store', metavar="ip address", help='IP Address of the domain controller or KDC (Key Distribution Center) for Kerberos. If omitted it will use the domain part (FQDN) specified in the identity parameter')
-    authconn.add_argument('--kdcHost', dest="kdcHost", action='store', metavar="FQDN KDC", help='FQDN of KDC for Kerberos.')
+    authconn = parser.add_argument_group("authentication & connection")
+    authconn.add_argument("--dc-ip", action="store", metavar="ip address", help="IP Address of the domain controller or KDC (Key Distribution Center) for Kerberos. If omitted it will use the domain part (FQDN) specified in the identity parameter")
+    authconn.add_argument("--kdcHost", dest="kdcHost", action="store", metavar="FQDN KDC", help="FQDN of KDC for Kerberos.")
     authconn.add_argument("-d", "--domain", dest="auth_domain", metavar="DOMAIN", action="store", help="(FQDN) domain to authenticate to")
     authconn.add_argument("-u", "--user", dest="auth_username", metavar="USER", action="store", help="user to authenticate with")
 
     secret = parser.add_argument_group()
     cred = secret.add_mutually_exclusive_group()
-    cred.add_argument('--no-pass', action="store_true", help='don\'t ask for password (useful for -k)')
+    cred.add_argument("--no-pass", action="store_true", help="Don't ask for password (useful for -k)")
     cred.add_argument("-p", "--password", dest="auth_password", metavar="PASSWORD", action="store", help="password to authenticate with")
-    cred.add_argument("-H", "--hashes", dest="auth_hashes", action="store", metavar="[LMHASH:]NTHASH", help='NT/LM hashes, format is LMhash:NThash')
-    cred.add_argument('--aes-key', dest="auth_key", action="store", metavar="hex key", help='AES key to use for Kerberos Authentication (128 or 256 bits)')
-    secret.add_argument("-k", "--kerberos", dest="use_kerberos", action="store_true", help='Use Kerberos authentication. Grabs credentials from .ccache file (KRB5CCNAME) based on target parameters. If valid credentials cannot be found, it will use the ones specified in the command line')
+    cred.add_argument("-H", "--hashes", dest="auth_hashes", action="store", metavar="[LMHASH:]NTHASH", help="NT/LM hashes, format is LMhash:NThash")
+    cred.add_argument("--aes-key", dest="auth_key", action="store", metavar="hex key", help="AES key to use for Kerberos Authentication (128 or 256 bits)")
+    secret.add_argument("-k", "--kerberos", dest="use_kerberos", action="store_true", help="Use Kerberos authentication. Grabs credentials from .ccache file (KRB5CCNAME) based on target parameters. If valid credentials cannot be found, it will use the ones specified in the command line")
 
     if len(sys.argv) == 1:
         parser.print_help()
@@ -464,10 +502,10 @@ def parse_args():
 
 
 if __name__ == '__main__':
-    options = parse_args()
+    options = parseArgs()
 
     if not options.quiet:
-        print("LDAP search console v%s - by @podalirius_\n" % VERSION)
+        print("LDAPconsole v%s - by @podalirius_\n" % VERSION)
 
     # Parse hashes
     if options.auth_hashes is not None:
@@ -669,7 +707,7 @@ if __name__ == '__main__':
                     # 
                     elif command == "presetquery":
                         pq = PresetQueries(ldapSearcher=ls)
-                        pq.perform(command, arguments)
+                        pq.perform(command=arguments[0], arguments=arguments[1:])
                     
                     # Display help
                     elif command == "help":
