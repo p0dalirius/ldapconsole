@@ -523,7 +523,10 @@ if __name__ == '__main__':
     # Try to authenticate with specified credentials
     try:
         if not options.quiet:
-            print("[>] Try to authenticate as '%s\\%s' on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
+            if options.auth_domain is not None:
+                print("[>] Try domain authentication as '%s\\%s' on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
+            else:
+                print("[>] Try local authentication as '%s' on %s ... " % (options.auth_username, options.dc_ip))
         ldap_server, ldap_session = init_ldap_session(
             auth_domain=options.auth_domain,
             auth_dc_ip=options.dc_ip,
