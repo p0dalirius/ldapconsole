@@ -179,6 +179,8 @@ class LDAPSearcher(object):
                     results[entry['dn']] = entry["attributes"]
         except ldap3.core.exceptions.LDAPInvalidFilterError as e:
             print("Invalid Filter. (ldap3.core.exceptions.LDAPInvalidFilterError)")
+        except ldap3.core.exceptions.LDAPAttributeError as e:
+            print("Invalid attribute. (ldap3.core.exceptions.LDAPAttributeError)")
         except Exception as e:
             raise e
         return results
