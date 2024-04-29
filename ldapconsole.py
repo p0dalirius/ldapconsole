@@ -16,7 +16,7 @@ import traceback
 import xlsxwriter
 
 
-VERSION = "2.0.2"
+VERSION = "2.1.0"
 
 
 class CommandCompleter(object):
@@ -25,41 +25,74 @@ class CommandCompleter(object):
     """
     def __init__(self):
         self.options = {
-            "diff": [],
-            "exit": [],
-            "help": [],
-            "infos": [],
-            "presetquery": ["all_users", "all_groups", "all_kerberoastables", "all_descriptions"],
-            "query": [],
-            "rootdse": [],
-            "searchbase": [],
-            "searchscope": []
+            "diff": {
+                "description": ["Show the differences between the last two requests."], 
+                "subcommands": []
+            },
+            "exit": {
+                "description": ["Exits the ldapconsole script."], 
+                "subcommands": []
+            },
+            "help": {
+                "description": ["Displays this help message."], 
+                "subcommands": []
+            },
+            "infos": {
+                "description": ["Get information about the remote ldap server."], 
+                "subcommands": []
+            },
+            "presetquery": {
+                "description": ["Use a builtin preset query."], 
+                "subcommands": ["all_descriptions", "all_groups", "all_kerberoastables", "all_users"]
+            },
+            "query": {
+                "description": [
+                    "Perform a LDAP query.",
+                    "You can query specific attributes by adding 'select <attribute 1> <attribute 2> ... <attribute n>'.",
+                    "Syntax: query <filter> [select <attribute 1> <attribute 2> ... <attribute n>]"
+                ],
+                "subcommands": []
+            },
+            "rootdse": {
+                "description": ["Queries the rootDSE."], 
+                "subcommands": []
+            },
+            "searchbase": {
+                "description": ["Sets the search base for the LDAP queries.", "The accepted values are: 'defaultNamingContext', 'configurationNamingContext' or a distinguishedName.", "The values for this attribute are case-insensitive."], 
+                "subcommands": []
+            },
+            "searchscope": {
+                "description": ["Sets the search scope for the LDAP queries.", "The accepted values are: BASE, LEVEL, SUBTREE.", "The values for this attribute are case-insensitive."], 
+                "subcommands": []
+            }
         }
+        self.options["presetquery"]["description"].append("Available preset queries are: " + ', '.join(self.options["presetquery"]["subcommands"]))
+
 
     def complete(self, text, state):
         """
         Function to handle command completion in the LDAP console.
 
-        This function completes the user's input based on the available options for commands in the LDAP console.
+        This function completes the user"s input based on the available options for commands in the LDAP console.
 
         Args:
             text (str): The current text input by the user.
             state (int): The current state of completion.
 
         Returns:
-            str: The next completion suggestion based on the user's input state.
+            str: The next completion suggestion based on the user"s input state.
         """
         if state == 0:
             if len(text) == 0:
                 self.matches = [s for s in self.options.keys()]
             elif len(text) != 0:
 
-                if text.count(' ') == 0:
+                if text.count(" ") == 0:
                     self.matches = [s for s in self.options.keys() if s and s.startswith(text)]
-                elif text.count(' ') == 1:
-                    command, remainder = text.split(' ', 1)
+                elif text.count(" ") == 1:
+                    command, remainder = text.split(" ", 1)
                     if command in self.options.keys():
-                        self.matches = [command + " " + s for s in self.options[command] if s and s.startswith(remainder)]
+                        self.matches = [command + " " + s for s in self.options[command]["subcommands"] if s and s.startswith(remainder)]
                     else:
                         pass
                 else:
@@ -71,10 +104,25 @@ class CommandCompleter(object):
         except IndexError:
             return None
 
+    def print_help(self):
+        print("│")
+        commands = sorted(self.options.keys())
+        for command in commands:
+            command_str = command + " \x1b[90m" + "─"* (15 - len(command)) + "\x1b[0m"
+            if len(self.options[command]["description"]) == 0:
+                print("│ ■ %s\x1b[90m┤\x1b[0m  " % command_str)
+            elif len(self.options[command]["description"]) == 1:
+                print("│ ■ %s\x1b[90m┤\x1b[0m %s " % (command_str, self.options[command]["description"][0]))
+            else:
+                print("│ ■ %s\x1b[90m┤\x1b[0m %s " % (command_str, self.options[command]["description"][0]))
+                for line in self.options[command]["description"][1:]:
+                    print("│ %s\x1b[90m│\x1b[0m %s " % (" "*(15+3), line))
+            print("│")
 
-readline.set_completer(CommandCompleter().complete)
-readline.parse_and_bind('tab: complete')
-readline.set_completer_delims('\n')
+commandCompleterObject = CommandCompleter()
+readline.set_completer(commandCompleterObject.complete)
+readline.parse_and_bind("tab: complete")
+readline.set_completer_delims("\n")
 
 ### Data utils
 
@@ -117,7 +165,7 @@ class LDAPSearcher(object):
     - ldap_session (ldap3.Connection): The LDAP session to use for executing queries.
 
     Methods:
-    - query(base_dn, query, attributes=['*'], page_size=1000): Executes an LDAP query with optional notification control.
+    - query(base_dn, query, attributes=["*"], page_size=1000): Executes an LDAP query with optional notification control.
 
     Raises:
     - ldap3.core.exceptions.LDAPInvalidFilterError: If the provided query string is not a valid LDAP filter.
@@ -128,7 +176,7 @@ class LDAPSearcher(object):
         self.ldap_server = ldap_server
         self.ldap_session = ldap_session
 
-    def query(self, base_dn, query, attributes=['*'], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
+    def query(self, base_dn, query, attributes=["*"], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
         """
         Executes an LDAP query with optional notification control.
 
@@ -138,7 +186,7 @@ class LDAPSearcher(object):
 
         Parameters:
         - query (str): The LDAP query string.
-        - attributes (list of str): A list of attribute names to include in the search results. Defaults to ['*'], which returns all attributes.
+        - attributes (list of str): A list of attribute names to include in the search results. Defaults to ["*"], which returns all attributes.
         - notify (bool): If True, enables the LDAP server notification control to receive updates about changes. Defaults to False.
 
         Returns:
@@ -177,9 +225,9 @@ class LDAPSearcher(object):
                 else:
                     paged_response = False
                 for entry in self.ldap_session.response:
-                    if entry['type'] != 'searchResEntry':
+                    if entry["type"] != "searchResEntry":
                         continue
-                    results[entry['dn']] = entry["attributes"]
+                    results[entry["dn"]] = entry["attributes"]
         except ldap3.core.exceptions.LDAPInvalidFilterError as e:
             print("Invalid Filter. (ldap3.core.exceptions.LDAPInvalidFilterError)")
         except ldap3.core.exceptions.LDAPAttributeError as e:
@@ -188,18 +236,18 @@ class LDAPSearcher(object):
             raise e
         return results
 
-    def query_all_naming_contexts(self, query, attributes=['*'], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
+    def query_all_naming_contexts(self, query, attributes=["*"], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
         """
         Queries all naming contexts on the LDAP server with the given query and attributes.
 
-        This method iterates over all naming contexts retrieved from the LDAP server's information,
+        This method iterates over all naming contexts retrieved from the LDAP server"s information,
         performing a paged search for each context using the provided query and attributes. The results
         are aggregated and returned as a dictionary where each key is a distinguished name (DN) and
         each value is a dictionary of attributes for that DN.
 
         Parameters:
         - query (str): The LDAP query to execute.
-        - attributes (list of str): A list of attribute names to retrieve for each entry. Defaults to ['*'] which fetches all attributes.
+        - attributes (list of str): A list of attribute names to retrieve for each entry. Defaults to ["*"] which fetches all attributes.
 
         Returns:
         - dict: A dictionary where each key is a DN and each value is a dictionary of attributes for that DN.
@@ -233,9 +281,9 @@ class LDAPSearcher(object):
                     else:
                         paged_response = False
                     for entry in self.ldap_session.response:
-                        if entry['type'] != 'searchResEntry':
+                        if entry["type"] != "searchResEntry":
                             continue
-                        results[entry['dn']] = entry["attributes"]
+                        results[entry["dn"]] = entry["attributes"]
         except ldap3.core.exceptions.LDAPInvalidFilterError as e:
             print("Invalid Filter. (ldap3.core.exceptions.LDAPInvalidFilterError)")
         except Exception as e:
@@ -253,7 +301,7 @@ class LDAPSearcher(object):
         Returns:
         - None
         """
-        def _parse_print(element, depth=0, maxdepth=15, prompt=['  | ', '  └─>']):
+        def _parse_print(element, depth=0, maxdepth=15, prompt=["  | ", "  └─>"]):
             _pre = prompt[0] * (depth) + prompt[1]
             if depth < maxdepth:
                 if type(element) == ldap3.utils.ciDict.CaseInsensitiveDict:
@@ -290,7 +338,7 @@ class LDAPSearcher(object):
                 pass
         #
         print("│ %s" % dn)
-        _parse_print(data, prompt=['    ', '    '])
+        _parse_print(data, prompt=["    ", "    "])
 
 
 class PresetQueries(object):
@@ -356,15 +404,15 @@ class PresetQueries(object):
             
             elif command == "all_kerberoastables":
                 _query = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-                _attrs = ['sAMAccountName', 'servicePrincipalName']
+                _attrs = ["sAMAccountName", "servicePrincipalName"]
                 last2_query_results = last1_query_results
                 last1_query_results = self.ldapSearcher.query(_query, attributes=_attrs, quiet=True)
                 if len(last1_query_results.keys()) != 0:
                     for key in last1_query_results.keys():
                         user = last1_query_results[key]
-                        _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
+                        _sAMAccountName = user["sAMAccountName"][0].decode("UTF-8")
                         for spn in user["servicePrincipalName"]:
-                            print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (_sAMAccountName, spn.decode('UTF-8')))
+                            print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (_sAMAccountName, spn.decode("UTF-8")))
                 else:
                     print("\x1b[91mNo results.\x1b[0m")
                     
@@ -376,14 +424,14 @@ class PresetQueries(object):
                 if len(last1_query_results.keys()) != 0:
                     for key in last1_query_results.keys():
                         user = last1_query_results[key]
-                        _sAMAccountName = user["sAMAccountName"][0].decode('UTF-8')
-                        _description = user["description"][0].decode('UTF-8')
+                        _sAMAccountName = user["sAMAccountName"][0].decode("UTF-8")
+                        _description = user["description"][0].decode("UTF-8")
                         print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
                 else:
                     print("\x1b[91mNo results.\x1b[0m")
         
         else:
-            print("[!] Unknown preset query '%s'. Here is a list of the available preset queries:" % command)
+            print("[!] Unknown preset query \"%s\". Here is a list of the available preset queries:" % command)
             self.print_help()
 
     def get_all_users(self, attributes=["objectSid", "sAMAccountName"]):
@@ -403,14 +451,14 @@ class PresetQueries(object):
         if len(results.keys()) != 0:
             if attributes == ["objectSid", "sAMAccountName"]:
                 for distinguishedName in results.keys():
-                    _sAMAccountName = results[distinguishedName]["sAMAccountName"][0].decode('UTF-8')
+                    _sAMAccountName = results[distinguishedName]["sAMAccountName"][0].decode("UTF-8")
                     _sid = format_sid(results[distinguishedName]["objectSid"][0])
                     print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _sid))
             else:
                 for distinguishedName in results.keys():
                     print("[+] %s" % distinguishedName)
                     for attrName in attributes:
-                        print(" | %s : %s" % (attrName, results[distinguishedName][attrName][0].decode('UTF-8')))
+                        print(" | %s : %s" % (attrName, results[distinguishedName][attrName][0].decode("UTF-8")))
         else:
             print("\x1b[91mNo results.\x1b[0m")
 
@@ -454,25 +502,6 @@ class PresetQueries(object):
             print(" - %-15s %s. (LDAP Filter: %s)" % (command, self.preset_queries[command]["description"], self.preset_queries[command]["filter"]))
 
 
-def print_help():
-    """
-    Function to print the available commands and their descriptions.
-
-    Args:
-        None
-
-    Returns:
-        None
-    """
-    print(" - %-15s %s " % ("base", "Sets LDAP base DN."))
-    print(" - %-15s %s " % ("diff", "Show the differences between the last two requests."))
-    print(" - %-15s %s " % ("query", "Sends a query to LDAP."))
-    print(" - %-15s %s " % ("presetquery", "Use a builtin preset query."))
-    print(" - %-15s %s " % ("help", "Displays this help message."))
-    print(" - %-15s %s " % ("exit", "Exits the script."))
-    return
-
-
 def parseArgs():
     parser = argparse.ArgumentParser(add_help=True, description="LDAP console")
     parser.add_argument("--use-ldaps", action="store_true", help="Use LDAPS instead of LDAP")
@@ -507,7 +536,7 @@ def parseArgs():
     return args
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     options = parseArgs()
 
     if not options.quiet:
@@ -530,9 +559,9 @@ if __name__ == '__main__':
     try:
         if not options.quiet:
             if options.auth_domain is not None:
-                print("[>] Try domain authentication as '%s\\%s' on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
+                print("[>] Try domain authentication as \"%s\\%s\" on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
             else:
-                print("[>] Try local authentication as '%s' on %s ... " % (options.auth_username, options.dc_ip))
+                print("[>] Try local authentication as \"%s\" on %s ... " % (options.auth_username, options.dc_ip))
         ldap_server, ldap_session = init_ldap_session(
             auth_domain=options.auth_domain,
             auth_dc_ip=options.dc_ip,
@@ -576,17 +605,17 @@ if __name__ == '__main__':
                 
                 # https://xlsxwriter.readthedocs.io/workbook.html#Workbook
                 workbook_options = {
-                    'constant_memory': True, 
-                    'in_memory': True, 
-                    'strings_to_formulas': False,
-                    'remove_timezone': True
+                    "constant_memory": True, 
+                    "in_memory": True, 
+                    "strings_to_formulas": False,
+                    "remove_timezone": True
                 }
                 workbook = xlsxwriter.Workbook(filename=path_to_file, options=workbook_options)
                 worksheet = workbook.add_worksheet()
                 
-                if '*' in options.attributes:
+                if "*" in options.attributes:
                     attributes = []
-                    options.attributes.remove('*')
+                    options.attributes.remove("*")
                     attributes += options.attributes
                     first_dn = list(results.keys())[0]
                     for dn in results.keys():
@@ -594,7 +623,7 @@ if __name__ == '__main__':
                 else:
                     attributes = options.attributes
 
-                header_format = workbook.add_format({'bold': 1})
+                header_format = workbook.add_format({"bold": 1})
                 header_fields = ["distinguishedName"] + attributes
                 for k in range(len(header_fields)):
                     worksheet.set_column(k, k + 1, len(header_fields[k]) + 3)
@@ -612,7 +641,7 @@ if __name__ == '__main__':
                             elif type(value) == bytes:
                                 data.append(str(value))
                             elif type(value) == list:
-                                data.append('\n'.join([str(l) for l in value]))
+                                data.append("\n".join([str(l) for l in value]))
                             else:
                                 data.append(str(value))
                         else:
@@ -640,66 +669,18 @@ if __name__ == '__main__':
                     userinput = input("[\x1b[95m%s\x1b[0m]> " % search_base).strip().split(" ")
                     command, arguments = userinput[0].lower(), userinput[1:]
 
-                    # Exit the command line
-                    if command == "exit":
-                        running = False
-
-                    # Perform an LDAP query
-                    elif command == "query":
-                        _query = ' '.join(arguments[0:]).strip()
-                        last2_query = last1_query
-                        last1_query = _query
-                        if len(_query) == 0:
-                            print("\x1b[91m[!] Empty query.\x1b[0m")
-                        else:
-                            try:
-                                _select_index = [c.lower() for c in arguments].index('select')
-                            except ValueError as e:
-                                _select_index = -1
-
-                            if _select_index != -1:
-                                _query = ' '.join(arguments[0:_select_index]).strip()
-                                _attrs = ' '.join(arguments[_select_index + 1:]).replace(',',' ').split(' ')
-                            else:
-                                _query = ' '.join(arguments[0:]).strip()
-                                _attrs = ['*']
-
-                            last2_query_results = last1_query_results
-                            last1_query_results = ls.query(base_dn=search_base, query=_query, attributes=_attrs)
-
-                            for dn in sorted(list(last1_query_results.keys())):
-                                ls.print_colored_result(dn=dn, data=last1_query_results[dn])
-                            
-                            print("└──> LDAP query returned %d results." % len(last1_query_results.keys()))
-                    
-                    # Set the search base
-                    elif command == "searchbase":
-                        __searchbase = ' '.join(arguments)
-                        if '.' in __searchbase:
-                            __searchbase = ','.join(["DC=%s" % part for part in __searchbase.split('.')])
-                        search_base = __searchbase
-
-                    # Set the search scope
-                    elif command == "searchscope":
-                        if arguments[0].lower() == "base":
-                            search_scope = ldap3.BASE
-                        elif arguments[0].lower() == "level":
-                            search_scope = ldap3.LEVEL
-                        elif arguments[0].lower() == "subtree":
-                            search_scope = ldap3.SUBTREE
-
                     # Displays the difference between this query results and the results of the query before
-                    elif command == "diff":
+                    if command == "diff":
                         # Todo; handle the added and removed DN results
                         common_keys = []
                         for key in last2_query_results.keys():
                             if key in last1_query_results.keys():
                                 common_keys.append(key)
                             else:
-                                print("[!] key '%s' was deleted in last results." % key)
+                                print("[!] key \"%s\" was deleted in last results." % key)
                         for key in last1_query_results.keys():
                             if key not in last2_query_results.keys():
-                                print("[!] key '%s' was added in last results." % key)
+                                print("[!] key \"%s\" was added in last results." % key)
                         #
                         for _dn in common_keys:
                             paths_l2 = dict_get_paths(last2_query_results[_dn])
@@ -727,6 +708,51 @@ if __name__ == '__main__':
                                     else:
                                         print("    " + "  > " + "New value: None (attribute is not present in the reponse)")
 
+                    # Exit the command line
+                    elif command == "exit":
+                        running = False
+
+                    # Display help
+                    elif command == "help":
+                        commandCompleterObject.print_help()
+
+                    # Display infos
+                    elif command == "infos":
+                        pass
+
+                    # Perform a presetquery
+                    elif command == "presetquery":
+                        pq = PresetQueries(ldapSearcher=ls)
+                        pq.perform(command=arguments[0], arguments=arguments[1:])
+                    
+                    # Perform an LDAP query
+                    elif command == "query":
+                        _query = " ".join(arguments[0:]).strip()
+                        last2_query = last1_query
+                        last1_query = _query
+                        if len(_query) == 0:
+                            print("\x1b[91m[!] Empty query.\x1b[0m")
+                        else:
+                            try:
+                                _select_index = [c.lower() for c in arguments].index("select")
+                            except ValueError as e:
+                                _select_index = -1
+
+                            if _select_index != -1:
+                                _query = " ".join(arguments[0:_select_index]).strip()
+                                _attrs = " ".join(arguments[_select_index + 1:]).replace(","," ").split(" ")
+                            else:
+                                _query = " ".join(arguments[0:]).strip()
+                                _attrs = ["*"]
+
+                            last2_query_results = last1_query_results
+                            last1_query_results = ls.query(base_dn=search_base, query=_query, attributes=_attrs)
+
+                            for dn in sorted(list(last1_query_results.keys())):
+                                ls.print_colored_result(dn=dn, data=last1_query_results[dn])
+                            
+                            print("└──> LDAP query returned %d results." % len(last1_query_results.keys()))
+                    
                     # Query the rootdse
                     elif command == "rootdse":
                         _query = "(objectClass=*)"
@@ -741,9 +767,9 @@ if __name__ == '__main__':
                                 _select_index = -1
 
                             if _select_index != -1:
-                                _attrs = ' '.join(arguments[_select_index + 1:]).replace(',',' ').split(' ')
+                                _attrs = " ".join(arguments[_select_index + 1:]).replace(","," ").split(" ")
                             else:
-                                _attrs = ['*']
+                                _attrs = ["*"]
 
                             last2_query_results = last1_query_results
                             last1_query_results = ls.query(
@@ -759,18 +785,25 @@ if __name__ == '__main__':
                             
                             print("└──> LDAP query returned %d results." % len(last1_query_results.keys()))
 
-                    # Perform a presetquery
-                    elif command == "presetquery":
-                        pq = PresetQueries(ldapSearcher=ls)
-                        pq.perform(command=arguments[0], arguments=arguments[1:])
-                    
-                    # Display help
-                    elif command == "help":
-                        print_help()
+                    # Set the search base
+                    elif command == "searchbase":
+                        __searchbase = " ".join(arguments)
+                        if "." in __searchbase:
+                            __searchbase = ",".join(["DC=%s" % part for part in __searchbase.split(".")])
+                        search_base = __searchbase
+
+                    # Set the search scope
+                    elif command == "searchscope":
+                        if arguments[0].lower() == "base":
+                            search_scope = ldap3.BASE
+                        elif arguments[0].lower() == "level":
+                            search_scope = ldap3.LEVEL
+                        elif arguments[0].lower() == "subtree":
+                            search_scope = ldap3.SUBTREE
 
                     # Fallback to unknown command
                     else:
-                        print("Unknown command. Type 'help' for help.")
+                        print("Unknown command. Type \"help\" for help.")
 
                 except KeyboardInterrupt as e:
                     print()
