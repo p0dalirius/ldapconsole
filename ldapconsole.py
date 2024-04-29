@@ -740,7 +740,10 @@ if __name__ == "__main__":
 
                             if _select_index != -1:
                                 _query = " ".join(arguments[0:_select_index]).strip()
-                                _attrs = " ".join(arguments[_select_index + 1:]).replace(","," ").split(" ")
+                                if len(arguments[_select_index + 1:]) == 0:
+                                    _attrs = []
+                                else:
+                                    _attrs = " ".join(arguments[_select_index + 1:]).replace(","," ").split(" ")
                             else:
                                 _query = " ".join(arguments[0:]).strip()
                                 _attrs = ["*"]
@@ -767,7 +770,10 @@ if __name__ == "__main__":
                                 _select_index = -1
 
                             if _select_index != -1:
-                                _attrs = " ".join(arguments[_select_index + 1:]).replace(","," ").split(" ")
+                                if len(arguments[_select_index + 1:]) == 0:
+                                    _attrs = []
+                                else:
+                                    _attrs = " ".join(arguments[_select_index + 1:]).replace(","," ").split(" ")
                             else:
                                 _attrs = ["*"]
 
