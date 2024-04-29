@@ -155,7 +155,6 @@ class LDAPSearcher(object):
             paged_response = True
             paged_cookie = None
             while paged_response == True:
-                print(type(self.ldap_session))
                 self.ldap_session.search(
                     search_base=base_dn,
                     search_filter=query,
@@ -688,7 +687,7 @@ if __name__ == '__main__':
                             search_scope = ldap3.LEVEL
                         elif arguments[0].lower() == "subtree":
                             search_scope = ldap3.SUBTREE
-                            
+
                     # Displays the difference between this query results and the results of the query before
                     elif command == "diff":
                         # Todo; handle the added and removed DN results
