@@ -680,6 +680,15 @@ if __name__ == '__main__':
                             __searchbase = ','.join(["DC=%s" % part for part in __searchbase.split('.')])
                         search_base = __searchbase
 
+                    # Set the search scope
+                    elif command == "searchscope":
+                        if arguments[0].lower() == "base":
+                            search_scope = ldap3.BASE
+                        elif arguments[0].lower() == "level":
+                            search_scope = ldap3.LEVEL
+                        elif arguments[0].lower() == "subtree":
+                            search_scope = ldap3.SUBTREE
+                            
                     # Displays the difference between this query results and the results of the query before
                     elif command == "diff":
                         # Todo; handle the added and removed DN results
