@@ -4,15 +4,15 @@
 # Author             : Podalirius (@podalirius_)
 # Date created       : 29 Jul 2021
 
-import readline
 import argparse
 from ldap3.protocol.formatters.formatters import format_sid
 import ldap3
+import os
+import readline
 from sectools.windows.ldap import init_ldap_session
 from sectools.windows.crypto import parse_lm_nt_hashes
-import os
-import traceback
 import sys
+import traceback
 import xlsxwriter
 
 
@@ -26,12 +26,14 @@ class CommandCompleter(object):
     def __init__(self):
         self.options = {
             "diff": [],
-            "query": [],
-            "presetquery": ["all_users", "all_groups", "all_kerberoastables", "all_descriptions"],
+            "exit": [],
             "help": [],
             "infos": [],
+            "presetquery": ["all_users", "all_groups", "all_kerberoastables", "all_descriptions"],
+            "query": [],
+            "rootdse": [],
             "searchbase": [],
-            "exit": []
+            "searchscope": []
         }
 
     def complete(self, text, state):
@@ -126,7 +128,7 @@ class LDAPSearcher(object):
         self.ldap_server = ldap_server
         self.ldap_session = ldap_session
 
-    def query(self, base_dn, query, attributes=['*'], page_size=1000):
+    def query(self, base_dn, query, attributes=['*'], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
         """
         Executes an LDAP query with optional notification control.
 
@@ -153,11 +155,13 @@ class LDAPSearcher(object):
             paged_response = True
             paged_cookie = None
             while paged_response == True:
+                print(type(self.ldap_session))
                 self.ldap_session.search(
-                    base_dn,
-                    query,
+                    search_base=base_dn,
+                    search_filter=query,
+                    search_scope=search_scope,
                     attributes=attributes,
-                    size_limit=0,
+                    size_limit=size_limit,
                     paged_size=page_size,
                     paged_cookie=paged_cookie
                 )
@@ -185,7 +189,7 @@ class LDAPSearcher(object):
             raise e
         return results
 
-    def query_all_naming_contexts(self, query, attributes=['*'], page_size=1000):
+    def query_all_naming_contexts(self, query, attributes=['*'], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
         """
         Queries all naming contexts on the LDAP server with the given query and attributes.
 
@@ -209,10 +213,11 @@ class LDAPSearcher(object):
                 paged_cookie = None
                 while paged_response == True:
                     self.ldap_session.search(
-                        naming_context,
-                        query,
+                        search_base=naming_context,
+                        search_filter=query,
+                        search_scope=search_scope,
                         attributes=attributes,
-                        size_limit=0,
+                        size_limit=size_limit,
                         paged_size=page_size,
                         paged_cookie=paged_cookie
                     )
@@ -547,6 +552,8 @@ if __name__ == '__main__':
         search_base = ldap_server.info.other["defaultNamingContext"][0]
         ls = LDAPSearcher(ldap_server=ldap_server, ldap_session=ldap_session)
 
+        search_scope = ldap3.SUBTREE
+
         # Single query inline
         if options.query is not None:
             results = ls.query(
@@ -634,9 +641,11 @@ if __name__ == '__main__':
                     userinput = input("[\x1b[95m%s\x1b[0m]> " % search_base).strip().split(" ")
                     command, arguments = userinput[0].lower(), userinput[1:]
 
+                    # Exit the command line
                     if command == "exit":
                         running = False
 
+                    # Perform an LDAP query
                     elif command == "query":
                         _query = ' '.join(arguments[0:]).strip()
                         last2_query = last1_query
@@ -651,7 +660,7 @@ if __name__ == '__main__':
 
                             if _select_index != -1:
                                 _query = ' '.join(arguments[0:_select_index]).strip()
-                                _attrs = arguments[_select_index + 1:]
+                                _attrs = ' '.join(arguments[_select_index + 1:]).replace(',',' ').split(' ')
                             else:
                                 _query = ' '.join(arguments[0:]).strip()
                                 _attrs = ['*']
@@ -663,7 +672,8 @@ if __name__ == '__main__':
                                 ls.print_colored_result(dn=dn, data=last1_query_results[dn])
                             
                             print("└──> LDAP query returned %d results." % len(last1_query_results.keys()))
-
+                    
+                    # Set the search base
                     elif command == "searchbase":
                         __searchbase = ' '.join(arguments)
                         if '.' in __searchbase:
@@ -709,7 +719,39 @@ if __name__ == '__main__':
                                     else:
                                         print("    " + "  > " + "New value: None (attribute is not present in the reponse)")
 
-                    # 
+                    # Query the rootdse
+                    elif command == "rootdse":
+                        _query = "(objectClass=*)"
+                        last2_query = last1_query
+                        last1_query = _query
+                        if len(_query) == 0:
+                            print("\x1b[91m[!] Empty query.\x1b[0m")
+                        else:
+                            try:
+                                _select_index = [c.lower() for c in arguments].index("select")
+                            except ValueError as e:
+                                _select_index = -1
+
+                            if _select_index != -1:
+                                _attrs = ' '.join(arguments[_select_index + 1:]).replace(',',' ').split(' ')
+                            else:
+                                _attrs = ['*']
+
+                            last2_query_results = last1_query_results
+                            last1_query_results = ls.query(
+                                base_dn="", 
+                                query=_query, 
+                                attributes=_attrs, 
+                                size_limit=1, 
+                                search_scope=ldap3.BASE
+                            )
+
+                            for dn in sorted(list(last1_query_results.keys())):
+                                ls.print_colored_result(dn="RootDSE", data=last1_query_results[dn])
+                            
+                            print("└──> LDAP query returned %d results." % len(last1_query_results.keys()))
+
+                    # Perform a presetquery
                     elif command == "presetquery":
                         pq = PresetQueries(ldapSearcher=ls)
                         pq.perform(command=arguments[0], arguments=arguments[1:])
