@@ -451,8 +451,8 @@ class PresetQueries(object):
         if len(results.keys()) != 0:
             if attributes == ["objectSid", "sAMAccountName"]:
                 for distinguishedName in results.keys():
-                    _sAMAccountName = results[distinguishedName]["sAMAccountName"][0].decode("UTF-8")
-                    _sid = format_sid(results[distinguishedName]["objectSid"][0])
+                    _sAMAccountName = results[distinguishedName]["sAMAccountName"]
+                    _sid = format_sid(results[distinguishedName]["objectSid"])
                     print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _sid))
             else:
                 for distinguishedName in results.keys():
