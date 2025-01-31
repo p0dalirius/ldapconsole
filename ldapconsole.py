@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# File name          : ldapsearch.py
+# File name          : ldapconsole.py
 # Author             : Podalirius (@podalirius_)
 # Date created       : 29 Jul 2021
 
@@ -540,7 +540,7 @@ if __name__ == "__main__":
     options = parseArgs()
 
     if not options.quiet:
-        print("LDAPconsole v%s - by @podalirius_\n" % VERSION)
+        print("LDAPconsole v%s - by Remi GASCOU (Podalirius)\n" % VERSION)
 
     # Parse hashes
     if options.auth_hashes is not None:
