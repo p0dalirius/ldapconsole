@@ -9,7 +9,7 @@ from ldap3.protocol.formatters.formatters import format_sid
 import ldap3
 import os
 import readline
-from sectools.windows.ldap import init_ldap_session
+from sectools.windows.ldap.ldap import init_ldap_session
 from sectools.windows.crypto import parse_lm_nt_hashes
 import sys
 import traceback
