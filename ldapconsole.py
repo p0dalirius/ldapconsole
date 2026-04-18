@@ -5,6 +5,9 @@
 # Date created       : 29 Jul 2021
 
 import argparse
+import csv
+import datetime
+import json
 from ldap3.protocol.formatters.formatters import format_sid
 import ldap3
 import os
@@ -30,8 +33,15 @@ class CommandCompleter(object):
                 "subcommands": []
             },
             "exit": {
-                "description": ["Exits the ldapconsole script."], 
+                "description": ["Exits the ldapconsole script."],
                 "subcommands": []
+            },
+            "export": {
+                "description": [
+                    "Export the results of the last query to a file.",
+                    "Syntax: export <json|csv|xlsx> <path>"
+                ],
+                "subcommands": ["json", "csv", "xlsx"]
             },
             "help": {
                 "description": ["Displays this help message."], 
@@ -143,6 +153,128 @@ def dict_path_access(d, path):
         else:
             return None
     return d
+
+
+### Export helpers
+
+EXPORT_FORMATS = ("json", "csv", "xlsx")
+
+
+def _resolve_export_path(path):
+    basepath = os.path.dirname(path)
+    filename = os.path.basename(path)
+    if basepath not in [".", ""]:
+        if not os.path.exists(basepath):
+            os.makedirs(basepath)
+        return basepath + os.path.sep + filename
+    return filename
+
+
+def _collect_attributes(results, requested_attributes):
+    if requested_attributes and "*" not in requested_attributes:
+        return list(requested_attributes)
+    attributes = set()
+    for dn in results.keys():
+        attributes.update(results[dn].keys())
+    return sorted(attributes)
+
+
+def _stringify_cell(value):
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, list):
+        return "\n".join(_stringify_cell(v) for v in value)
+    if isinstance(value, ldap3.utils.ciDict.CaseInsensitiveDict):
+        return json.dumps({k: _jsonable(v) for k, v in value.items()})
+    return str(value)
+
+
+def _jsonable(value):
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, bytes):
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return value.hex()
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return value.isoformat()
+    if isinstance(value, list):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, ldap3.utils.ciDict.CaseInsensitiveDict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    if isinstance(value, dict):
+        return {k: _jsonable(v) for k, v in value.items()}
+    return str(value)
+
+
+def export_results(results, fmt, path, attributes=None):
+    """
+    Export a results dict ({dn: {attribute: value, ...}, ...}) to `path`
+    in one of EXPORT_FORMATS. If `attributes` is empty or contains "*",
+    the column list is the sorted union of every attribute seen in the
+    results. Returns the absolute path of the written file.
+    """
+    fmt = fmt.lower()
+    if fmt not in EXPORT_FORMATS:
+        raise ValueError("Unsupported export format: %s (use one of %s)" % (fmt, ", ".join(EXPORT_FORMATS)))
+
+    path_to_file = _resolve_export_path(path)
+
+    if fmt == "json":
+        payload = {dn: _jsonable(results[dn]) for dn in results.keys()}
+        with open(path_to_file, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, indent=2, ensure_ascii=False)
+        return path_to_file
+
+    cols = _collect_attributes(results, attributes)
+    header_fields = ["distinguishedName"] + cols
+
+    if fmt == "csv":
+        with open(path_to_file, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(header_fields)
+            for dn in results.keys():
+                row = [dn]
+                for attr in cols:
+                    if attr in results[dn].keys():
+                        row.append(_stringify_cell(results[dn][attr]))
+                    else:
+                        row.append("")
+                writer.writerow(row)
+        return path_to_file
+
+    # fmt == "xlsx"
+    workbook_options = {
+        "constant_memory": True,
+        "in_memory": True,
+        "strings_to_formulas": False,
+        "remove_timezone": True,
+    }
+    workbook = xlsxwriter.Workbook(filename=path_to_file, options=workbook_options)
+    worksheet = workbook.add_worksheet()
+    header_format = workbook.add_format({"bold": 1})
+    for k in range(len(header_fields)):
+        worksheet.set_column(k, k + 1, len(header_fields[k]) + 3)
+    worksheet.set_row(0, 20, header_format)
+    worksheet.write_row(0, 0, header_fields)
+    row_id = 1
+    for dn in results.keys():
+        row = [dn]
+        for attr in cols:
+            if attr in results[dn].keys():
+                row.append(_stringify_cell(results[dn][attr]))
+            else:
+                row.append("")
+        worksheet.write_row(row_id, 0, row)
+        row_id += 1
+    last_row = max(row_id - 1, 1)
+    worksheet.autofilter(0, 0, last_row, len(header_fields) - 1)
+    workbook.close()
+    return path_to_file
 
 
 ### LDAPConsole
@@ -711,6 +843,23 @@ if __name__ == "__main__":
                     # Exit the command line
                     elif command == "exit":
                         running = False
+
+                    # Export the results of the last query
+                    elif command == "export":
+                        if len(arguments) < 2:
+                            print("\x1b[91m[!] Usage: export <%s> <path>\x1b[0m" % "|".join(EXPORT_FORMATS))
+                        elif len(last1_query_results) == 0:
+                            print("\x1b[91m[!] No query results to export. Run a query first.\x1b[0m")
+                        else:
+                            fmt = arguments[0].lower()
+                            out_path = " ".join(arguments[1:])
+                            try:
+                                written_to = export_results(last1_query_results, fmt, out_path)
+                                print("[+] Exported %d results to %s" % (len(last1_query_results), written_to))
+                            except ValueError as e:
+                                print("\x1b[91m[!] %s\x1b[0m" % str(e))
+                            except OSError as e:
+                                print("\x1b[91m[!] Could not write to %s: %s\x1b[0m" % (out_path, str(e)))
 
                     # Display help
                     elif command == "help":
