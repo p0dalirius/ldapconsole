@@ -890,14 +890,14 @@ if __name__ == "__main__":
                                 for _ad in attrs_diff:
                                     path, vl1, vl2 = _ad
                                     print("    " + "──>".join(["\"\x1b[93m%s\x1b[0m\"" % attr for attr in path]) + ":")
-                                    if vl1 is not None:
+                                    if vl2 is not None:
                                         print("    " + "  > " + "Old value:", vl2)
                                     else:
-                                        print("    " + "  > " + "Old value: None (attribute was not present in the last reponse)")
-                                    if vl2 is not None:
+                                        print("    " + "  > " + "Old value: None (attribute was not present in the last response)")
+                                    if vl1 is not None:
                                         print("    " + "  > " + "New value:", vl1)
                                     else:
-                                        print("    " + "  > " + "New value: None (attribute is not present in the reponse)")
+                                        print("    " + "  > " + "New value: None (attribute is not present in the response)")
 
                     # Exit the command line
                     elif command == "exit":
