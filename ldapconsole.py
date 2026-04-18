@@ -642,9 +642,18 @@ class PresetQueries(object):
 
         if len(results.keys()) != 0:
             for distinguishedName in results.keys():
-                _sAMAccountName = results[distinguishedName]["sAMAccountName"]
-                _description = format_sid(results[distinguishedName]["description"][0])
-                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
+                entry = results[distinguishedName]
+                sam = entry.get("sAMAccountName")
+                if isinstance(sam, list):
+                    sam = sam[0] if sam else ""
+                if isinstance(sam, bytes):
+                    sam = sam.decode("utf-8", errors="replace")
+                description = entry.get("description")
+                if isinstance(description, list):
+                    description = description[0] if description else ""
+                if isinstance(description, bytes):
+                    description = description.decode("utf-8", errors="replace")
+                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (sam, description))
         else:
             print("\x1b[91mNo results.\x1b[0m")
 
