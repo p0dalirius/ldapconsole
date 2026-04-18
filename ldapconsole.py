@@ -163,6 +163,8 @@ class LDAPSearcher(object):
     Attributes:
     - ldap_server (str): The LDAP server to connect to.
     - ldap_session (ldap3.Connection): The LDAP session to use for executing queries.
+    - reconnect (callable): Optional zero-arg callable returning a fresh (ldap_server, ldap_session) tuple, used to recover from socket errors.
+    - max_retries (int): Number of times to retry a search after a socket error before giving up.
 
     Methods:
     - query(base_dn, query, attributes=["*"], page_size=1000): Executes an LDAP query with optional notification control.
@@ -171,10 +173,36 @@ class LDAPSearcher(object):
     - ldap3.core.exceptions.LDAPInvalidFilterError: If the provided query string is not a valid LDAP filter.
     - Exception: For any other issues encountered during the search operation.
     """
-    def __init__(self, ldap_server, ldap_session):
+    def __init__(self, ldap_server, ldap_session, reconnect=None, max_retries=3):
         super(LDAPSearcher, self).__init__()
         self.ldap_server = ldap_server
         self.ldap_session = ldap_session
+        self.reconnect = reconnect
+        self.max_retries = max_retries
+
+    def _search_with_retry(self, **search_kwargs):
+        """
+        Execute ldap_session.search with automatic reconnect on socket errors.
+
+        On ldap3.core.exceptions.LDAPCommunicationError (covers connection reset,
+        broken pipe, socket close) re-establish the session via the reconnect
+        callback if provided and retry up to max_retries times.
+        """
+        attempt = 0
+        while True:
+            try:
+                self.ldap_session.search(**search_kwargs)
+                return
+            except ldap3.core.exceptions.LDAPCommunicationError as e:
+                attempt += 1
+                if attempt > self.max_retries or self.reconnect is None:
+                    raise
+                print("\x1b[93m[!] LDAP socket error (%s). Reconnecting (attempt %d/%d)...\x1b[0m" % (str(e), attempt, self.max_retries))
+                try:
+                    self.ldap_server, self.ldap_session = self.reconnect()
+                except Exception as reconnect_err:
+                    print("\x1b[91m[!] Reconnect failed: %s\x1b[0m" % str(reconnect_err))
+                    raise e
 
     def query(self, base_dn, query, attributes=["*"], page_size=1000, size_limit=0, search_scope=ldap3.SUBTREE):
         """
@@ -203,7 +231,7 @@ class LDAPSearcher(object):
             paged_response = True
             paged_cookie = None
             while paged_response == True:
-                self.ldap_session.search(
+                self._search_with_retry(
                     search_base=base_dn,
                     search_filter=query,
                     search_scope=search_scope,
@@ -259,7 +287,7 @@ class LDAPSearcher(object):
                 paged_response = True
                 paged_cookie = None
                 while paged_response == True:
-                    self.ldap_session.search(
+                    self._search_with_retry(
                         search_base=naming_context,
                         search_filter=query,
                         search_scope=search_scope,
@@ -562,23 +590,26 @@ if __name__ == "__main__":
                 print("[>] Try domain authentication as \"%s\\%s\" on %s ... " % (options.auth_domain, options.auth_username, options.dc_ip))
             else:
                 print("[>] Try local authentication as \"%s\" on %s ... " % (options.auth_username, options.dc_ip))
-        ldap_server, ldap_session = init_ldap_session(
-            auth_domain=options.auth_domain,
-            auth_dc_ip=options.dc_ip,
-            auth_username=options.auth_username,
-            auth_password=options.auth_password,
-            auth_lm_hash=auth_lm_hash,
-            auth_nt_hash=auth_nt_hash,
-            auth_key=options.auth_key,
-            use_kerberos=options.use_kerberos,
-            kdcHost=options.kdcHost,
-            use_ldaps=options.use_ldaps
-        )
+        def _open_ldap_session():
+            return init_ldap_session(
+                auth_domain=options.auth_domain,
+                auth_dc_ip=options.dc_ip,
+                auth_username=options.auth_username,
+                auth_password=options.auth_password,
+                auth_lm_hash=auth_lm_hash,
+                auth_nt_hash=auth_nt_hash,
+                auth_key=options.auth_key,
+                use_kerberos=options.use_kerberos,
+                kdcHost=options.kdcHost,
+                use_ldaps=options.use_ldaps
+            )
+
+        ldap_server, ldap_session = _open_ldap_session()
         if not options.quiet:
             print("[+] Authentication successful!\n")
 
         search_base = ldap_server.info.other["defaultNamingContext"][0]
-        ls = LDAPSearcher(ldap_server=ldap_server, ldap_session=ldap_session)
+        ls = LDAPSearcher(ldap_server=ldap_server, ldap_session=ldap_session, reconnect=_open_ldap_session)
 
         search_scope = ldap3.SUBTREE
 
