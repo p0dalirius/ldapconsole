@@ -723,7 +723,11 @@ if __name__ == "__main__":
                     # Perform a presetquery
                     elif command == "presetquery":
                         pq = PresetQueries(ldapSearcher=ls)
-                        pq.perform(command=arguments[0], arguments=arguments[1:])
+                        if len(arguments) == 0:
+                            print("[!] Usage: presetquery <name>. Available preset queries:")
+                            pq.print_help()
+                        else:
+                            pq.perform(command=arguments[0], arguments=arguments[1:])
                     
                     # Perform an LDAP query
                     elif command == "query":
@@ -800,12 +804,18 @@ if __name__ == "__main__":
 
                     # Set the search scope
                     elif command == "searchscope":
-                        if arguments[0].lower() == "base":
-                            search_scope = ldap3.BASE
-                        elif arguments[0].lower() == "level":
-                            search_scope = ldap3.LEVEL
-                        elif arguments[0].lower() == "subtree":
-                            search_scope = ldap3.SUBTREE
+                        if len(arguments) == 0:
+                            print("[!] Usage: searchscope <base|level|subtree>")
+                        else:
+                            scope_arg = arguments[0].lower()
+                            if scope_arg == "base":
+                                search_scope = ldap3.BASE
+                            elif scope_arg == "level":
+                                search_scope = ldap3.LEVEL
+                            elif scope_arg == "subtree":
+                                search_scope = ldap3.SUBTREE
+                            else:
+                                print("[!] Unknown scope %r. Accepted values: base, level, subtree" % arguments[0])
 
                     # Fallback to unknown command
                     else:
