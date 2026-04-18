@@ -52,8 +52,8 @@ class CommandCompleter(object):
                 "subcommands": []
             },
             "presetquery": {
-                "description": ["Use a builtin preset query."], 
-                "subcommands": ["all_descriptions", "all_groups", "all_kerberoastables", "all_users"]
+                "description": ["Use a builtin preset query."],
+                "subcommands": ["all_computers", "all_descriptions", "all_groups", "all_organizational_units", "all_users"]
             },
             "query": {
                 "description": [
