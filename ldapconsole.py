@@ -961,7 +961,7 @@ if __name__ == "__main__":
                                 _attrs = ["*"]
 
                             last2_query_results = last1_query_results
-                            last1_query_results = ls.query(base_dn=search_base, query=_query, attributes=_attrs)
+                            last1_query_results = ls.query(base_dn=search_base, query=_query, attributes=_attrs, search_scope=search_scope)
 
                             for dn in sorted(list(last1_query_results.keys())):
                                 ls.print_colored_result(dn=dn, data=last1_query_results[dn])
