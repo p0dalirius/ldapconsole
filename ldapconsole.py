@@ -538,6 +538,11 @@ class PresetQueries(object):
             "description": "Get the list of all organizationalUnits.",
             "filter": "(objectClass=organizationalUnit)",
             "attributes": ["distinguishedName"]
+        },
+        "all_kerberoastables": {
+            "description": "Get all user accounts with a servicePrincipalName (kerberoastable).",
+            "filter": "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))",
+            "attributes": ["sAMAccountName", "servicePrincipalName"]
         }
     }
     
@@ -561,38 +566,52 @@ class PresetQueries(object):
 
             elif command == "all_descriptions":
                 self.get_all_descriptions()
-            
+
             elif command == "all_kerberoastables":
-                _query = "(&(objectClass=user)(servicePrincipalName=*)(!(objectClass=computer))(!(cn=krbtgt))(!(userAccountControl:1.2.840.113556.1.4.803:=2)))"
-                _attrs = ["sAMAccountName", "servicePrincipalName"]
-                last2_query_results = last1_query_results
-                last1_query_results = self.ldapSearcher.query(_query, attributes=_attrs, quiet=True)
-                if len(last1_query_results.keys()) != 0:
-                    for key in last1_query_results.keys():
-                        user = last1_query_results[key]
-                        _sAMAccountName = user["sAMAccountName"][0].decode("UTF-8")
-                        for spn in user["servicePrincipalName"]:
-                            print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (_sAMAccountName, spn.decode("UTF-8")))
-                else:
+                self.get_all_kerberoastables()
+
+            else:
+                results = self.ldapSearcher.query_all_naming_contexts(
+                    query=self.preset_queries[command]["filter"],
+                    attributes=self.preset_queries[command]["attributes"],
+                )
+                if len(results) == 0:
                     print("\x1b[91mNo results.\x1b[0m")
-                    
-            elif command == "all_descriptions":
-                _query = "(&(objectCategory=person)(objectClass=user)(description=*))"
-                _attrs = ["description", "sAMAccountName"]
-                last2_query_results = last1_query_results
-                last1_query_results = self.ldapSearcher.query(_query, attributes=_attrs, quiet=True)
-                if len(last1_query_results.keys()) != 0:
-                    for key in last1_query_results.keys():
-                        user = last1_query_results[key]
-                        _sAMAccountName = user["sAMAccountName"][0].decode("UTF-8")
-                        _description = user["description"][0].decode("UTF-8")
-                        print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%s\x1b[0m" % (_sAMAccountName, _description))
                 else:
-                    print("\x1b[91mNo results.\x1b[0m")
-        
+                    for distinguishedName in results.keys():
+                        print(" | \x1b[93m%s\x1b[0m" % distinguishedName)
+
         else:
             print("[!] Unknown preset query \"%s\". Here is a list of the available preset queries:" % command)
             self.print_help()
+
+    def get_all_kerberoastables(self):
+        """
+        Retrieve all user accounts that carry a servicePrincipalName and are
+        therefore kerberoastable (excluding computer accounts, krbtgt, and
+        disabled accounts). Prints each match as sAMAccountName / SPN pairs.
+        """
+        results = self.ldapSearcher.query_all_naming_contexts(
+            query=self.preset_queries["all_kerberoastables"]["filter"],
+            attributes=self.preset_queries["all_kerberoastables"]["attributes"],
+        )
+        if len(results) == 0:
+            print("\x1b[91mNo results.\x1b[0m")
+            return
+        for distinguishedName in results.keys():
+            entry = results[distinguishedName]
+            sam = entry.get("sAMAccountName")
+            if isinstance(sam, list):
+                sam = sam[0] if sam else ""
+            if isinstance(sam, bytes):
+                sam = sam.decode("utf-8", errors="replace")
+            spns = entry.get("servicePrincipalName") or []
+            if not isinstance(spns, list):
+                spns = [spns]
+            for spn in spns:
+                if isinstance(spn, bytes):
+                    spn = spn.decode("utf-8", errors="replace")
+                print(" | \x1b[93m%-25s\x1b[0m : \x1b[96m%-30s\x1b[0m" % (sam, spn))
 
     def get_all_users(self, attributes=["objectSid", "sAMAccountName"]):
         """
